@@ -2,6 +2,37 @@ import polars as pl
 import constants as ct
 import day_simulation
 
+def run_simulations(
+    date: str,
+    number_of_simulations: int,
+    forecast_one_ic: pl.DataFrame,
+    alpha_by_generator: pl.DataFrame,
+    beta_by_generator: pl.DataFrame,
+    bid_capacity_by_generator: pl.DataFrame,
+    generator_marginal_cost: float,
+    generator_capacity: float,
+    generator_id: int,
+    risk_aversion: float
+):
+    profits_by_sim = run_day_simulations(
+        date,
+        number_of_simulations,
+        forecast_one_ic,
+        alpha_by_generator,
+        beta_by_generator,
+        bid_capacity_by_generator,
+        generator_marginal_cost,
+        generator_capacity
+    )
+    
+    utility = calculate_utility(
+        profits_by_sim,
+        risk_aversion,
+        generator_id
+    )
+    
+    return utility
+
 def calculate_utility(
     day_simulation_results: pl.DataFrame,
     risk_aversion: float,
@@ -24,7 +55,6 @@ def run_day_simulations(
     bid_capacity_by_generator : pl.DataFrame,
     generator_marginal_cost : float,
     generator_capacity : float,
-    marginal_cost : float
 ) -> pl.DataFrame:
     
     forecast_one_day = forecast_one_ic.filter(pl.col(ct.ColumnNames.DATE.value) == date)
@@ -37,15 +67,12 @@ def run_day_simulations(
             number_of_simulations,
             alpha_by_generator,
             beta_by_generator,
-            generator_marginal_cost,
             bid_capacity_by_generator,
-            generator_capacity,
-            marginal_cost
+            generator_marginal_cost,
+            generator_capacity
         )
         profits.append(profits_by_generator)
     
     profits_df = pl.concat(profits)
-    mean_profits = profits_df.mean().to_dict()
-    variance_profits = profits_df.var().to_dict()
     
-    return mean_profits, variance_profits
+    return profits_df

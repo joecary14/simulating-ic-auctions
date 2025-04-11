@@ -12,7 +12,6 @@ def simulate_day(
     bid_capacity_by_generator : pl.DataFrame,
     generator_marginal_cost : float,
     generator_capacity : int,
-    marginal_cost : float
 ) -> pl.DataFrame:
     
     auction_information_one_day = get_auction_information_one_sim(
@@ -27,7 +26,7 @@ def simulate_day(
     profits_by_generator = calculate_profit_by_generator_one_sim(
         auction_information_one_day,
         generator_capacity,
-        marginal_cost
+        generator_marginal_cost
     )
     
     return profits_by_generator
@@ -38,9 +37,9 @@ def get_auction_information_one_sim(
     number_of_generators : int,
     alpha_by_generator : np.ndarray,
     beta_by_generator : np.ndarray,
-    generator_marginal_cost : float,
-    bid_capacity_by_generator : dict[str, np.ndarray]
-) -> dict[str, float]:
+    bid_capacity_by_generator : dict[str, np.ndarray],
+    generator_marginal_cost : float
+) -> auction_information.AuctionInformation:
     
     periods = forecast_prices_with_errors_one_day[ct.ColumnNames.DELIVERY_PERIOD.value].unique().to_list()
     actual_domestic_price = []
@@ -102,7 +101,7 @@ def get_bids_by_generator(
 def calculate_profit_by_generator_one_sim(
     auction_information_one_sim : auction_information.AuctionInformation,
     generator_capacity : int,
-    marginal_cost : float,
+    generator_marginal_cost : float,
 ) -> pl.DataFrame:
     
     auction_results, clearing_prices = auction_information_one_sim.run_auction()
@@ -111,8 +110,8 @@ def calculate_profit_by_generator_one_sim(
     domestic_prices = auction_information_one_sim.actual_domestic_prices.copy()
     foreign_prices = auction_information_one_sim.actual_foreign_prices.copy()
     
-    domestic_prices[domestic_prices < marginal_cost] = 0
-    foreign_prices[foreign_prices < marginal_cost] = 0
+    domestic_prices[domestic_prices < generator_marginal_cost] = 0
+    foreign_prices[foreign_prices < generator_marginal_cost] = 0
     net_foreign_prices = foreign_prices - clearing_prices
     
     profits_by_generator = (
