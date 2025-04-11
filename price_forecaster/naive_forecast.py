@@ -191,8 +191,8 @@ def calculate_rolling_correlations(
         df = df.sort("timestamp")
         
         df = df.with_columns(
-            pl.col(ct.ColumnNames.DOMESTIC_PRICE.value)
-            .rolling_corr(pl.col(ct.ColumnNames.FOREIGN_PRICE.value), window_size=rolling_window_days*24, min_periods =(rolling_window_days-1)*24).alias("rolling_correlation")
+            pl.col(ct.ColumnNames.DOMESTIC_FORECAST_ERROR.value)
+            .rolling_corr(pl.col(ct.ColumnNames.FOREIGN_FORECAST_ERROR.value), window_size=rolling_window_days*24, min_periods =(rolling_window_days-1)*24).alias(ct.ColumnNames.ROLLING_CORRELATION.value)
         )
         
         forecast_error_dfs[ic] = df_with_correl

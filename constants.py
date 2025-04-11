@@ -8,6 +8,7 @@ ic_name_to_source_country_dict = {
 }
 
 class ColumnNames(Enum):
+    AVAILABLE_CAPACITY = "available_capacity"
     DATE = "date"
     DELIVERY_PERIOD = "delivery_period"
     DOMESTIC_FORECAST_ERROR = "domestic_forecast_error"
@@ -18,4 +19,5 @@ class ColumnNames(Enum):
     FOREIGN_FORECAST_ERROR = "foreign_forecast_error"
     FOREIGN_FORECAST_ERROR_STDEV = "foreign_forecast_error_stdev"
     FOREIGN_PRICE = "foreign_price"
+    ROLLING_CORRELATION = "rolling_correlation"
     

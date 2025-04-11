@@ -1,176 +1,151 @@
 import polars as pl
 import numpy as np
-from scipy.linalg import cholesky
 import constants as ct
+import auction_simulation.auction_information as auction_information
 
-def run_day_simulation(
-    forecast_prices_with_errors_by_ic: dict[str, pl.DataFrame],
-    number_of_simulations: int,
-    number_of_generators: int
-) -> dict[str, pl.DataFrame]:
-    for interconnector, forecast_prices_with_errors in forecast_prices_with_errors_by_ic.items():
-        dates = forecast_prices_with_errors[ct.ColumnNames.DATE.value].unique().to_list()
-        
-        for date in dates:
-            day_data = forecast_prices_with_errors.filter(
-                pl.col(ct.ColumnNames.DATE.value) == date
-            )
-
-def run_simulations_one_day(
-    day_data: pl.DataFrame,
-    interconnector: str,
-    number_of_simulations: int,
-    number_of_generators: int
+def simulate_day(
+    forecast_prices_with_errors_one_day : pl.DataFrame,
+    covariance_matrix_by_period : dict[str, np.ndarray],
+    number_of_generators : int,
+    alpha_by_generator : pl.DataFrame,
+    beta_by_generator : pl.DataFrame,
+    bid_capacity_by_generator : pl.DataFrame,
+    generator_marginal_cost : float,
+    generator_capacity : int,
+    marginal_cost : float
 ) -> pl.DataFrame:
+    
+    auction_information_one_day = get_auction_information_one_sim(
+        forecast_prices_with_errors_one_day,
+        covariance_matrix_by_period,
+        number_of_generators,
+        alpha_by_generator,
+        beta_by_generator,
+        generator_marginal_cost,
+        bid_capacity_by_generator
+    )
+    profits_by_generator = calculate_profit_by_generator_one_sim(
+        auction_information_one_day,
+        generator_capacity,
+        marginal_cost
+    )
+    
+    return profits_by_generator
 
-    # Get correlation between domestic and foreign prices
-    # This could be calculated from historical data or supplied as a parameter
-    price_correlation = 0.7  # Example value, replace with actual correlation
+def get_auction_information_one_sim(
+    forecast_prices_with_errors_one_day : pl.DataFrame,
+    covariance_matrix_by_period : dict[str, np.ndarray],
+    number_of_generators : int,
+    alpha_by_generator : np.ndarray,
+    beta_by_generator : np.ndarray,
+    generator_marginal_cost : float,
+    bid_capacity_by_generator : dict[str, np.ndarray]
+) -> dict[str, float]:
     
-    # Extract the required data for each period
-    all_periods_results = []
-    
-    for period in day_data[ct.ColumnNames.DELIVERY_PERIOD.value].unique().sort():
-        period_data = day_data.filter(
+    periods = forecast_prices_with_errors_one_day[ct.ColumnNames.DELIVERY_PERIOD.value].unique().to_list()
+    actual_domestic_price = []
+    actual_foreign_price = []
+    bids_by_generator_by_period = {}
+    for period in periods:
+        period_data = forecast_prices_with_errors_one_day.filter(
             pl.col(ct.ColumnNames.DELIVERY_PERIOD.value) == period
         )
-        
-        # Extract the date
-        date = period_data[ct.ColumnNames.DATE.value][0]
-        
-        # Get the forecasts and standard deviations
         domestic_forecast = period_data[ct.ColumnNames.FORECAST_DOMESTIC_PRICE.value][0]
         foreign_forecast = period_data[ct.ColumnNames.FORECAST_FOREIGN_PRICE.value][0]
+        cov_matrix = covariance_matrix_by_period[period]
         
+        samples = np.random.multivariate_normal(
+            [0, 0], cov_matrix, size=number_of_generators + 1
+        )
+        
+        domestic_prices = domestic_forecast + samples[:, 0]
+        foreign_prices = foreign_forecast + samples[:, 1]
+        actual_domestic_price.append(domestic_prices[0])
+        actual_foreign_price.append(foreign_prices[0])
+        
+        bids_by_generator = get_bids_by_generator(
+            domestic_prices[1:],
+            foreign_prices[1:],
+            alpha_by_generator,
+            beta_by_generator,
+            generator_marginal_cost
+        )
+        
+        bids_by_generator_by_period[period] = bids_by_generator
+    
+    bids_by_generator_by_period = pl.DataFrame(bids_by_generator_by_period)  
+    
+    auction_information_one_day = auction_information.AuctionInformation(
+        actual_domestic_prices = np.array(actual_domestic_price),
+        actual_foreign_prices = np.array(actual_foreign_price),
+        bids_by_generator_by_period = bids_by_generator_by_period,
+        capacity_by_generator_by_period = bid_capacity_by_generator,
+        capacity_offered = forecast_prices_with_errors_one_day[ct.ColumnNames.AVAILABLE_CAPACITY.value].to_numpy()
+    )
+    
+    return auction_information_one_day
+        
+def get_bids_by_generator(
+    forecast_domestic_prices: np.ndarray,
+    forecast_foreign_prices: np.ndarray,
+    alpha_by_generator: np.ndarray,
+    beta_by_generator: np.ndarray,
+    generator_marginal_cost: float
+):
+    option_values = np.maximum(forecast_foreign_prices - forecast_domestic_prices, 0)
+    option_values[forecast_foreign_prices <= generator_marginal_cost] = 0
+    
+    bid_prices = alpha_by_generator + beta_by_generator * option_values
+   
+    return bid_prices
+
+def calculate_profit_by_generator_one_sim(
+    auction_information_one_sim : auction_information.AuctionInformation,
+    generator_capacity : int,
+    marginal_cost : float,
+) -> pl.DataFrame:
+    
+    auction_results, clearing_prices = auction_information_one_sim.run_auction()
+    capacity_for_domestic_market = generator_capacity - auction_results
+    
+    domestic_prices = auction_information_one_sim.actual_domestic_prices.copy()
+    foreign_prices = auction_information_one_sim.actual_foreign_prices.copy()
+    
+    domestic_prices[domestic_prices < marginal_cost] = 0
+    foreign_prices[foreign_prices < marginal_cost] = 0
+    net_foreign_prices = foreign_prices - clearing_prices
+    
+    profits_by_generator = (
+        capacity_for_domestic_market * domestic_prices
+        + auction_results * net_foreign_prices
+    )
+    
+    daily_profits = profits_by_generator.sum(axis=0)
+    generator_ids = auction_results.columns
+    
+    profits_df = pl.DataFrame({col : profit for col, profit in zip(generator_ids, daily_profits)})
+        
+    return profits_df
+
+def get_covariance_matrix_by_period(
+    forecast_prices_with_errors_one_day : pl.DataFrame
+) -> dict[str, np.ndarray]:
+    periods = forecast_prices_with_errors_one_day[ct.ColumnNames.DELIVERY_PERIOD.value].unique().to_list()
+    covariance_matrices = {}
+    for period in periods:
+        period_data = forecast_prices_with_errors_one_day.filter(
+            pl.col(ct.ColumnNames.DELIVERY_PERIOD.value) == period
+        )
+        price_correlation = period_data[ct.ColumnNames.ROLLING_CORRELATION.value][0]
         domestic_stdev = period_data[ct.ColumnNames.DOMESTIC_FORECAST_ERROR_STDEV.value][0]
         foreign_stdev = period_data[ct.ColumnNames.FOREIGN_FORECAST_ERROR_STDEV.value][0]
         
-        # Generate correlated random samples for this period across all simulations
-        domestic_prices, foreign_prices = generate_correlated_prices(
-            domestic_forecast, 
-            foreign_forecast,
-            domestic_stdev,
-            foreign_stdev,
-            price_correlation,
-            number_of_simulations
-        )
-        
-        # Process each simulation
-        period_results = []
-        for sim_idx in range(number_of_simulations):
-            domestic_price = domestic_prices[sim_idx]
-            foreign_price = foreign_prices[sim_idx]
-            
-            # For each generator, calculate profit
-            for gen_idx in range(1, number_of_generators + 1):
-                # Calculate profit (replace with your actual profit calculation)
-                profit = calculate_generator_profit(
-                    gen_idx, 
-                    domestic_price, 
-                    foreign_price,
-                    interconnector
-                )
-                
-                # Append result
-                period_results.append({
-                    ct.ColumnNames.DATE.value: date,
-                    ct.ColumnNames.DELIVERY_PERIOD.value: period,
-                    "simulation": sim_idx,
-                    "generator": gen_idx,
-                    "profit": profit,
-                    "domestic_price": domestic_price,
-                    "foreign_price": foreign_price
-                })
-        
-        all_periods_results.extend(period_results)
+        corr_matrix = np.array([
+        [1.0, price_correlation],
+        [price_correlation, 1.0]
+        ])
+        std_vector = np.array([domestic_stdev, foreign_stdev])
+        cov_matrix = np.outer(std_vector, std_vector) * corr_matrix
+        covariance_matrices[period] = cov_matrix
     
-    # Convert to DataFrame
-    return pl.DataFrame(all_periods_results)
-
-def generate_correlated_prices(
-    domestic_forecast: float,
-    foreign_forecast: float,
-    domestic_stdev: float,
-    foreign_stdev: float,
-    correlation: float,
-    num_samples: int
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Generate correlated random price samples based on forecasts and standard deviations.
-    
-    Args:
-        domestic_forecast: Forecasted domestic price
-        foreign_forecast: Forecasted foreign price
-        domestic_stdev: Standard deviation of domestic forecast errors
-        foreign_stdev: Standard deviation of foreign forecast errors
-        correlation: Correlation coefficient between domestic and foreign prices
-        num_samples: Number of samples to generate
-        
-    Returns:
-        Tuple of arrays (domestic_prices, foreign_prices)
-    """
-    # Create correlation matrix
-    corr_matrix = np.array([
-        [1.0, correlation],
-        [correlation, 1.0]
-    ])
-    
-    # Create covariance matrix
-    std_vector = np.array([domestic_stdev, foreign_stdev])
-    cov_matrix = np.outer(std_vector, std_vector) * corr_matrix
-    
-    # Generate multivariate normal random samples
-    try:
-        # Use Cholesky decomposition for more efficient sampling
-        L = cholesky(cov_matrix, lower=True)
-        uncorrelated_samples = np.random.normal(0, 1, (num_samples, 2))
-        correlated_samples = uncorrelated_samples @ L.T
-    except np.linalg.LinAlgError:
-        # Fallback if Cholesky decomposition fails
-        correlated_samples = np.random.multivariate_normal(
-            [0, 0], cov_matrix, size=num_samples
-        )
-    
-    # Add forecasts to get the final prices
-    domestic_prices = domestic_forecast + correlated_samples[:, 0]
-    foreign_prices = foreign_forecast + correlated_samples[:, 1]
-    
-    # Ensure prices don't go negative (optional)
-    domestic_prices = np.maximum(domestic_prices, 0)
-    foreign_prices = np.maximum(foreign_prices, 0)
-    
-    return domestic_prices, foreign_prices
-
-def calculate_generator_profit(
-    generator_id: int,
-    domestic_price: float,
-    foreign_price: float,
-    interconnector: str
-) -> float:
-    """
-    Calculate the profit for a generator based on simulated prices.
-    
-    Args:
-        generator_id: ID of the generator
-        domestic_price: Simulated domestic price
-        foreign_price: Simulated foreign price
-        interconnector: Name of the interconnector
-        
-    Returns:
-        Calculated profit
-    """
-    # Replace with your actual profit calculation logic
-    # This is just a placeholder example
-    price_difference = foreign_price - domestic_price
-    
-    # Simple model: profit is proportional to price difference
-    # With some randomness for generator characteristics
-    generator_factor = 0.8 + (generator_id / 10)  # Example factor
-    
-    # Example profit calculation
-    if price_difference > 0:  # Exporting scenario
-        profit = price_difference * generator_factor
-    else:  # Importing scenario
-        profit = abs(price_difference) * (generator_factor * 0.5)  # Less profit in import scenarios
-    
-    return profit
+    return covariance_matrices
