@@ -1,13 +1,31 @@
 import polars as pl
 import pandas as pd
+import openpyxl
 
 def read_in_excel_data(
     filepath: str
 ) -> dict[str, pl.DataFrame]:
-    excel_data = pd.read_excel(filepath, sheet_name=None)
+    workbook = openpyxl.load_workbook(filepath, read_only=True)
+    sheet_names = workbook.sheetnames
+    workbook.close()
     
-    polars_data = {sheet_name: pl.DataFrame(sheet_data) for sheet_name, sheet_data in excel_data.items()}
-
+    polars_data = {}
+    for sheet_name in sheet_names:
+        df = pl.read_excel(
+            filepath, 
+            sheet_name=sheet_name
+        )
+        
+        for col in df.columns:
+            df = df.with_columns([
+                pl.when(pl.col(col).cast(pl.Utf8).is_in(["-", "NA", "N/A"]))
+                .then(None)
+                .otherwise(pl.col(col))
+                .alias(col)
+            ])
+        
+        polars_data[sheet_name] = df
+    
     return polars_data
 
 def write_data_to_excel(

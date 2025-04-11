@@ -4,7 +4,7 @@ import optimisation.optimisation_engine as optimisation_engine
 
 def run(
     read_in_filepath : str,
-    rolling_window : int,
+    rolling_window_days : int,
     number_of_simulations : int,
     number_of_generators : int,
     generator_marginal_cost : float,
@@ -16,7 +16,7 @@ def run(
     raw_data_dfs = excel_interaction.read_in_excel_data(read_in_filepath)
     naive_forecasts = naive.get_naive_forecasts(
         raw_data_dfs,
-        rolling_window
+        rolling_window_days
     )
     clearing_prices_by_ic = {}
     for str, naive_forecast in naive_forecasts.items():

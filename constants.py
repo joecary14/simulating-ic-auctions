@@ -15,6 +15,7 @@ class ColumnNames(Enum):
     DOMESTIC_FORECAST_ERROR_STDEV = "domestic_forecast_error_stdev"
     DOMESTIC_PRICE = "domestic_price"
     FORECAST_DOMESTIC_PRICE = "forecast_domestic_price"
+    FORECAST_ERROR_CORRELATIONS = "forecast_error_correlations"
     FORECAST_FOREIGN_PRICE = "forecast_foreign_price"
     FOREIGN_FORECAST_ERROR = "foreign_forecast_error"
     FOREIGN_FORECAST_ERROR_STDEV = "foreign_forecast_error_stdev"

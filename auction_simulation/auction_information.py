@@ -1,6 +1,6 @@
 import numpy as np
 import polars as pl
-import bid_information as bid_info
+import auction_simulation.bid_information as bid_info
 
 class AuctionInformation:
     def __init__(

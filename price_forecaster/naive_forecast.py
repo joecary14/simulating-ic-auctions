@@ -1,3 +1,4 @@
+import math
 import polars as pl
 import constants as ct
 import matplotlib.pyplot as plt
@@ -16,9 +17,9 @@ def get_naive_forecasts(
     
     forecast_uncertainties = calculate_forecast_stdevs(forecast_errors, rolling_window_days)
     
-    calculate_rolling_correlations(forecast_uncertainties, rolling_window_days)
+    forecast_errors_with_rolling_stdevs_and_correlations = calculate_rolling_correlations(forecast_uncertainties, rolling_window_days)
     
-    return forecast_uncertainties
+    return forecast_errors_with_rolling_stdevs_and_correlations
 
 def create_naive_forecast_by_date_and_period(
     raw_auction_data_dfs: dict[str, pl.DataFrame],
@@ -34,8 +35,9 @@ def create_naive_forecast_by_date_and_period(
             continue
         
         df = raw_auction_data_df.clone()
+        df.columns = [col.lower().replace(" ", "_") for col in df.columns]
         df = df.with_columns(
-            pl.col(ct.ColumnNames.DATE.value).str.strptime(pl.Date, fmt="%Y-%m-%d"),
+            pl.col(ct.ColumnNames.DATE.value).str.strptime(pl.Date),
         )
         
         df = df.sort(
@@ -47,7 +49,7 @@ def create_naive_forecast_by_date_and_period(
         )
         
         df = df.with_columns([
-            pl.when(pl.col("weekday").is_in([1, 2, 3, 4]))
+            pl.when(pl.col("weekday").is_in([2, 3, 4, 5]))
               .then(pl.col(ct.ColumnNames.DATE.value) - timedelta(days=1))
               .otherwise(pl.col(ct.ColumnNames.DATE.value) - timedelta(days=7))
               .alias("reference_date")
@@ -64,25 +66,26 @@ def create_naive_forecast_by_date_and_period(
             ]).alias("current_key")
         ])
         
-        reference_data = {}
+        current_price_data = {}
         for row in df.select([
-            "reference_key", 
+            "current_key", 
             ct.ColumnNames.DOMESTIC_PRICE.value, 
             ct.ColumnNames.FOREIGN_PRICE.value
         ]).iter_rows():
-            reference_data[row[0]] = (row[1], row[2])
+            key = tuple(row[0].values())
+            current_price_data[key] = (row[1], row[2])
         
         domestic_forecasts = []
         foreign_forecasts = []
         
         for row in df.select("reference_key").iter_rows():
-            key = row[0]
-            if key in reference_data:
-                domestic_forecasts.append(reference_data[key][0])
-                foreign_forecasts.append(reference_data[key][1])
+            key = tuple(row[0].values())
+            if key in current_price_data:
+                domestic_forecasts.append(current_price_data[key][0])
+                foreign_forecasts.append(current_price_data[key][1])
             else:
-                domestic_forecasts.append(None)
-                foreign_forecasts.append(None)
+                domestic_forecasts.append(math.nan)
+                foreign_forecasts.append(math.nan)
         
 
         df_with_forecasts = df.with_columns([
@@ -100,8 +103,11 @@ def create_naive_forecast_by_date_and_period(
 def calculate_forecast_errors(
     forecast_prices_by_ic: dict[str, pl.DataFrame]
 ) -> dict[str, pl.DataFrame]:
+    forecast_prices_and_errors_by_ic = {}
     for interconnector, forecast_df in forecast_prices_by_ic.items():
-        forecast_df = forecast_df.with_columns([
+        forecast_with_errors = forecast_df.clone()
+        forecast_with_errors = forecast_with_errors.drop_nans()
+        forecast_with_errors = forecast_with_errors.with_columns([
             (pl.col(ct.ColumnNames.FORECAST_DOMESTIC_PRICE.value) - 
              pl.col(ct.ColumnNames.DOMESTIC_PRICE.value))
             .alias(ct.ColumnNames.DOMESTIC_FORECAST_ERROR.value),
@@ -109,30 +115,99 @@ def calculate_forecast_errors(
              pl.col(ct.ColumnNames.FOREIGN_PRICE.value))
             .alias(ct.ColumnNames.FOREIGN_FORECAST_ERROR.value)
         ])
+        forecast_prices_and_errors_by_ic[interconnector] = forecast_with_errors
         
-    return forecast_prices_by_ic
+    return forecast_prices_and_errors_by_ic
 
 def calculate_forecast_stdevs(
     forecast_error_dfs: dict[str, pl.DataFrame],
     rolling_window_days: int
 ) -> dict[str, pl.DataFrame]:
     for interconnector, df in forecast_error_dfs.items():
-        df = df.with_columns([
-            pl.col(ct.ColumnNames.DOMESTIC_FORECAST_ERROR.value).shift(1).alias("shifted_domestic_error"),
-            pl.col(ct.ColumnNames.FOREIGN_FORECAST_ERROR.value).shift(1).alias("shifted_foreign_error"),
-        ])
+        df_copy = df.clone()
+        df_copy = df_copy.with_columns(pl.col(ct.ColumnNames.DATE.value).cast(pl.Date))
+        unique_dates = df_copy[ct.ColumnNames.DATE.value].unique().to_numpy()
+        all_dates = []
+        domestic_stds = []
+        foreign_stds = []
+        for current_date in unique_dates:
+            start_date = current_date - np.timedelta64(rolling_window_days, 'D')
+            filtered_df = df_copy.filter(
+                (pl.col(ct.ColumnNames.DATE.value) >= start_date) & 
+                (pl.col(ct.ColumnNames.DATE.value) < current_date)
+            )
+            if len(filtered_df) < rolling_window_days*24 - 1:
+                domestic_std = np.nan
+                foreign_std = np.nan
+            else:
+                domestic_std = filtered_df[ct.ColumnNames.DOMESTIC_FORECAST_ERROR.value].std()
+                foreign_std = filtered_df[ct.ColumnNames.FOREIGN_FORECAST_ERROR.value].std()
+            
+            python_date = current_date.astype('datetime64[D]').astype(object)
+            all_dates.append(python_date)
+            domestic_stds.append(domestic_std)
+            foreign_stds.append(foreign_std)
         
-        df = df.groupby_rolling(
-            index_column=ct.ColumnNames.DATE.value,
-            period=f"{rolling_window_days}d"
-        ).agg([
-            pl.col("shifted_domestic_error").std().alias(ct.ColumnNames.DOMESTIC_FORECAST_ERROR_STDEV.value),
-            pl.col("shifted_foreign_error").std().alias(ct.ColumnNames.FOREIGN_FORECAST_ERROR_STDEV.value),
-        ])
+        temp_df = pl.DataFrame({
+            ct.ColumnNames.DATE.value: pl.Series(all_dates, dtype=pl.Date),
+            ct.ColumnNames.DOMESTIC_FORECAST_ERROR_STDEV.value: pl.Series(domestic_stds, dtype=pl.Float64),
+            ct.ColumnNames.FOREIGN_FORECAST_ERROR_STDEV.value: pl.Series(foreign_stds, dtype=pl.Float64)
+        })
         
-        df = df.drop(["shifted_domestic_error", "shifted_foreign_error"])
+        df_copy = df_copy.join(
+            temp_df,
+            on=ct.ColumnNames.DATE.value,
+            how="left"
+        )
+        df_copy = df_copy.drop_nans()
         
-        forecast_error_dfs[interconnector] = df
+        forecast_error_dfs[interconnector] = df_copy
+    
+    return forecast_error_dfs
+
+#TODO - fix this function, as above
+def calculate_rolling_correlations(
+    forecast_error_dfs: dict[str, pl.DataFrame],
+    rolling_window_days: int
+) -> dict[str, pl.DataFrame]:
+    for ic, prices_df in forecast_error_dfs.items():
+        df_with_correl = prices_df.clone()
+        unique_dates = df_with_correl[ct.ColumnNames.DATE.value].unique().to_numpy()
+        all_dates = []
+        forecast_error_correlations = []
+        for current_date in unique_dates:
+            start_date = current_date - np.timedelta64(rolling_window_days, 'D')
+            filtered_df = df_with_correl.filter(
+                (pl.col(ct.ColumnNames.DATE.value) >= start_date) & 
+                (pl.col(ct.ColumnNames.DATE.value) < current_date)
+            )
+            if len(filtered_df) < rolling_window_days*24 - 1:
+                correlation = np.nan
+            else:
+                correlation = filtered_df.select(
+                    pl.corr(
+                        ct.ColumnNames.DOMESTIC_FORECAST_ERROR.value,
+                        ct.ColumnNames.FOREIGN_FORECAST_ERROR.value
+                    )
+                ).to_numpy()[0][0]
+            
+            python_date = current_date.astype('datetime64[D]').astype(object)
+            all_dates.append(python_date)
+            forecast_error_correlations.append(correlation)
+        
+        temp_df = pl.DataFrame({
+            ct.ColumnNames.DATE.value: pl.Series(all_dates, dtype=pl.Date),
+            ct.ColumnNames.DOMESTIC_FORECAST_ERROR_STDEV.value: pl.Series(forecast_error_correlations, dtype=pl.Float64)
+        })
+        
+        df_with_correl = df_with_correl.join(
+            temp_df,
+            on=ct.ColumnNames.DATE.value,
+            how="left"
+        )
+        df_with_correl = df_with_correl.drop_nans()
+        
+        forecast_error_dfs[ic] = df_with_correl
     
     return forecast_error_dfs
 
@@ -177,25 +252,6 @@ def check_error_normality(
         }
     
     return normality_results
-
-def calculate_rolling_correlations(
-    forecast_error_dfs: dict[str, pl.DataFrame],
-    rolling_window_days: int
-) -> None:
-    for ic, prices_df in forecast_error_dfs.items():
-        df_with_correl = prices_df.clone()
-        df_with_correl = df_with_correl.with_columns(
-            pl.col(ct.ColumnNames.DATE.value).str.strptime(pl.Datetime, fmt="%Y-%m-%d").alias(ct.ColumnNames.DATE.value),
-            ).with_columns(
-             (pl.col(ct.ColumnNames.DATE.value).cast(pl.Datetime) + pl.col(ct.ColumnNames.DELIVERY_PERIOD.value)).cast(pl.Duration).apply(lambda x: x * 3600)).alias("timestamp")
-        df = df.sort("timestamp")
-        
-        df = df.with_columns(
-            pl.col(ct.ColumnNames.DOMESTIC_FORECAST_ERROR.value)
-            .rolling_corr(pl.col(ct.ColumnNames.FOREIGN_FORECAST_ERROR.value), window_size=rolling_window_days*24, min_periods =(rolling_window_days-1)*24).alias(ct.ColumnNames.ROLLING_CORRELATION.value)
-        )
-        
-        forecast_error_dfs[ic] = df_with_correl
 
 def analyze_errors(
     errors: np.ndarray, 

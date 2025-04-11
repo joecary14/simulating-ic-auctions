@@ -1,6 +1,6 @@
 import polars as pl
 import constants as ct
-import day_simulation
+import auction_simulation.day_simulation as day_simulation
 
 def run_simulations(
     date: str,
