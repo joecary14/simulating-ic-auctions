@@ -17,7 +17,9 @@ def get_naive_forecasts(
     
     forecast_uncertainties = calculate_forecast_stdevs(forecast_errors, rolling_window_days)
     
-    forecast_errors_with_rolling_stdevs_and_correlations = calculate_rolling_correlations(forecast_uncertainties, rolling_window_days)
+    forecast_errors_with_rolling_stdevs_and_correlations = calculate_rolling_forecast_error_correlations(forecast_uncertainties, rolling_window_days)
+    
+    #check_error_normality(forecast_errors_with_rolling_stdevs_and_correlations)
     
     return forecast_errors_with_rolling_stdevs_and_correlations
 
@@ -165,8 +167,7 @@ def calculate_forecast_stdevs(
     
     return forecast_error_dfs
 
-#TODO - fix this function, as above
-def calculate_rolling_correlations(
+def calculate_rolling_forecast_error_correlations(
     forecast_error_dfs: dict[str, pl.DataFrame],
     rolling_window_days: int
 ) -> dict[str, pl.DataFrame]:
@@ -197,7 +198,7 @@ def calculate_rolling_correlations(
         
         temp_df = pl.DataFrame({
             ct.ColumnNames.DATE.value: pl.Series(all_dates, dtype=pl.Date),
-            ct.ColumnNames.DOMESTIC_FORECAST_ERROR_STDEV.value: pl.Series(forecast_error_correlations, dtype=pl.Float64)
+            ct.ColumnNames.FORECAST_ERROR_CORRELATIONS.value: pl.Series(forecast_error_correlations, dtype=pl.Float64)
         })
         
         df_with_correl = df_with_correl.join(

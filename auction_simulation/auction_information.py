@@ -1,5 +1,6 @@
 import numpy as np
 import polars as pl
+import constants as ct
 import auction_simulation.bid_information as bid_info
 
 class AuctionInformation:
@@ -7,8 +8,8 @@ class AuctionInformation:
         self, 
         actual_domestic_prices : np.ndarray, 
         actual_foreign_prices : np.ndarray,
-        bids_by_generator_by_period : dict[str, np.ndarray],
-        capacity_by_generator_by_period : dict[str, np.ndarray],
+        bids_by_generator_by_period : pl.DataFrame,
+        capacity_by_generator_by_period : pl.DataFrame,
         capacity_offered : np.ndarray
     ):
         self.actual_domestic_prices = actual_domestic_prices
@@ -19,14 +20,19 @@ class AuctionInformation:
         
     def run_auction(
         self
-    ):
-        results = []
-        clearing_prices = []
+    ) -> tuple[pl.DataFrame, pl.DataFrame]:
+        results = {}
+        clearing_prices = {}
+        periods = self.bids_by_generator_by_period[ct.ColumnNames.DELIVERY_PERIOD.value].to_numpy()
 
-        for period in range(len(self.capacity_offered)):
-            bids_by_generator = self.bids_by_generator_by_period[period]
-            capacity_by_generator = self.capacity_by_generator_by_period[period]
-            capacity_offered = self.capacity_offered[period]
+        for period_idx, period in enumerate(periods):
+            bids_by_generator = self.bids_by_generator_by_period.filter(
+                pl.col(ct.ColumnNames.DELIVERY_PERIOD.value) == period
+            ).drop(ct.ColumnNames.DELIVERY_PERIOD.value)
+            capacity_by_generator = self.capacity_by_generator_by_period.filter(
+                pl.col(ct.ColumnNames.DELIVERY_PERIOD.value) == period
+            ).drop(ct.ColumnNames.DELIVERY_PERIOD.value)
+            capacity_offered = self.capacity_offered[period_idx]
 
             accepted_bids, clearing_price = self.run_auction_one_period(
             bids_by_generator,
@@ -34,13 +40,13 @@ class AuctionInformation:
             capacity_by_generator
             )
 
-            results.append(accepted_bids)
-            clearing_prices.append(clearing_price)
+            results[period] = accepted_bids
+            clearing_prices[period] = clearing_price
+#TODO the format in which this is being saved is getting mangled
+        accepted_capacity_by_generator = pl.DataFrame(results)
+        clearing_prices = pl.DataFrame(clearing_prices)
 
-        accepted_capacity = pl.DataFrame(results)
-        clearing_prices_array = np.array(clearing_prices)
-
-        return accepted_capacity, clearing_prices_array
+        return accepted_capacity_by_generator, clearing_prices
     
     def run_auction_one_period(
         self,
@@ -58,28 +64,36 @@ class AuctionInformation:
         accepted_capacity = 0
         accepted_bids = {}
         clearing_price = 0
+        if all(bid.bid_capacity == 0 for bid in sorted_bids) or all(bid.bid_price == 0 for bid in sorted_bids):
+            return {bid.id: 0 for bid in sorted_bids}, 0
         
         for bid in sorted_bids:
             if accepted_capacity + bid.bid_capacity < capacity_offered:
                 accepted_bids[bid.id] = bid.bid_capacity
+                accepted_capacity += bid.bid_capacity
             elif accepted_capacity == capacity_offered:
                 accepted_bids[bid.id] = 0
             else:
                 accepted_bids[bid.id] = capacity_offered - accepted_capacity
+                accepted_capacity += capacity_offered - accepted_capacity
                 clearing_price = bid.bid_price
         
         return accepted_bids, clearing_price
     
     def create_bids(
-        bids_by_generator : np.ndarray,
-        capacity_by_generator : np.ndarray,
+        self,
+        bids_by_generator : pl.DataFrame,
+        capacity_by_generator : pl.DataFrame
     ) -> list[bid_info.BidInformation]:
         bids = []
-        for i in range(len(bids_by_generator)):
+        generator_ids = capacity_by_generator.columns
+        for generator_id in generator_ids:
+            bid_price = bids_by_generator[generator_id][0]
+            bid_capacity = capacity_by_generator[generator_id][0]
             bid = bid_info.BidInformation(
-                id = i,
-                bid_price = bids_by_generator[i],
-                bid_capacity = capacity_by_generator[i]
+                id = generator_id,
+                bid_price = bid_price,
+                bid_capacity = bid_capacity
             )
             bids.append(bid)
         

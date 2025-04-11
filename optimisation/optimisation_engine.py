@@ -63,7 +63,7 @@ def get_results_one_day(
         optimisation_tolerance
     )
     
-    covariance_matrix_by_period = day_simulation.get_covariance_matrix_by_period(forecast_one_ic)
+    covariance_matrix_by_period = day_simulation.get_covariance_matrix(forecast_one_ic)
     auction_information_one_day = day_simulation.get_auction_information_one_sim(
         forecast_one_ic,
         covariance_matrix_by_period,

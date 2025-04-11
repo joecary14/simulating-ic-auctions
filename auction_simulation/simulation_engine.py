@@ -5,9 +5,10 @@ import auction_simulation.day_simulation as day_simulation
 def run_simulations(
     date: str,
     number_of_simulations: int,
+    number_of_generators: int,
     forecast_one_ic: pl.DataFrame,
-    alpha_by_generator: pl.DataFrame,
-    beta_by_generator: pl.DataFrame,
+    alpha_by_generator: dict[str, float],
+    beta_by_generator: dict[str, float],
     bid_capacity_by_generator: pl.DataFrame,
     generator_marginal_cost: float,
     generator_capacity: float,
@@ -17,6 +18,7 @@ def run_simulations(
     profits_by_sim = run_day_simulations(
         date,
         number_of_simulations,
+        number_of_generators,
         forecast_one_ic,
         alpha_by_generator,
         beta_by_generator,
@@ -49,22 +51,23 @@ def calculate_utility(
 def run_day_simulations(
     date : str,
     number_of_simulations : int,
+    number_of_generators : int,
     forecast_one_ic : pl.DataFrame,
-    alpha_by_generator : pl.DataFrame,
-    beta_by_generator : pl.DataFrame,
+    alpha_by_generator : dict[str, float],
+    beta_by_generator : dict,
     bid_capacity_by_generator : pl.DataFrame,
     generator_marginal_cost : float,
     generator_capacity : float,
 ) -> pl.DataFrame:
     
     forecast_one_day = forecast_one_ic.filter(pl.col(ct.ColumnNames.DATE.value) == date)
-    covariance_matrix_by_period = day_simulation.get_covariance_matrix_by_period(forecast_one_day)
+    covariance_matrix = day_simulation.get_covariance_matrix(forecast_one_day)
     profits = []
     for i in range(number_of_simulations):
         profits_by_generator = day_simulation.simulate_day(
             forecast_one_day,
-            covariance_matrix_by_period,
-            number_of_simulations,
+            covariance_matrix,
+            number_of_generators,
             alpha_by_generator,
             beta_by_generator,
             bid_capacity_by_generator,

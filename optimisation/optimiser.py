@@ -17,24 +17,22 @@ def run_optimisation_for_day(
 ) -> np.ndarray:
     initial_alpha = {i : 0 for i in range(number_of_generators)}
     initial_beta = {i : 1 for i in range(number_of_generators)}
-    periods_in_day = forecast_one_ic_one_day[ct.ColumnNames.DELIVERY_PERIOD.value].unique().to_list().count()
-    initial_generator_capacity = [generator_capacity/10 for _ in range(periods_in_day)]
-    initial_capacity_bids = pl.DataFrame({i : initial_generator_capacity for i in range(number_of_generators)})
+    initial_generator_capacity = [generator_capacity/5 for _ in range(len(forecast_one_ic_one_day[ct.ColumnNames.DELIVERY_PERIOD.value]))]
+    initial_capacity_bids = {str(i) : initial_generator_capacity for i in range(number_of_generators)}
+    initial_capacity_bids[ct.ColumnNames.DELIVERY_PERIOD.value] = forecast_one_ic_one_day[ct.ColumnNames.DELIVERY_PERIOD.value]
+    initial_capacity_bids = pl.DataFrame(initial_capacity_bids)
     converged = False
     alpha_by_generator = initial_alpha.copy()
     beta_by_generator = initial_beta.copy()
-    bid_capacity_by_generator = initial_capacity_bids.copy()
+    bid_capacity_by_generator = initial_capacity_bids.clone()
     
     while not converged:
         utility_changes = []
         for i in range(number_of_generators):
-            alpha = alpha_by_generator[i]
-            beta = beta_by_generator[i]
-            bid_capacity = bid_capacity_by_generator[i]
-            
             utility = simulation_engine.run_simulations(
                 date,
                 number_of_simulations,
+                number_of_generators,
                 forecast_one_ic_one_day,
                 alpha_by_generator,
                 beta_by_generator,
@@ -48,6 +46,7 @@ def run_optimisation_for_day(
             new_strategy = optimise_strategy(
                 date,
                 number_of_simulations,
+                number_of_generators,
                 alpha_by_generator,
                 beta_by_generator,
                 bid_capacity_by_generator,
@@ -68,6 +67,7 @@ def run_optimisation_for_day(
             new_utility = simulation_engine.run_simulations(
                 date,
                 number_of_simulations,
+                number_of_generators,
                 forecast_one_ic_one_day,
                 candidate_alpha_by_generator,
                 candidate_beta_by_generator,
@@ -94,6 +94,7 @@ def objective_function(
     strategy_vector: np.ndarray,
     date: str,
     number_of_simulations: int,
+    number_of_generators: int,
     forecast_one_ic: pl.DataFrame,
     generator_marginal_cost: float,
     generator_capacity: float,
@@ -113,6 +114,7 @@ def objective_function(
     utility = simulation_engine.run_simulations(
         date,
         number_of_simulations,
+        number_of_generators,
         forecast_one_ic,
         candidate_alpha_by_generator,
         candidate_beta_by_generator,
@@ -128,6 +130,7 @@ def objective_function(
 def optimise_strategy(
     date: str,
     number_of_simulations: int,
+    number_of_generators: int,
     alpha_by_generator: dict[int, float],
     beta_by_generator: dict[int, float],
     bid_capacity_by_generator: pl.DataFrame,
@@ -146,7 +149,7 @@ def optimise_strategy(
     result = minimize(
         objective_function,
         x0 = initial_strategy,
-        args=(date, number_of_simulations, forecast_one_ic, generator_marginal_cost, generator_capacity, generator_id, risk_aversion),
+        args=(date, number_of_simulations, number_of_generators, forecast_one_ic, generator_marginal_cost, generator_capacity, generator_id, risk_aversion),
         method="Nelder-Mead"
     )
     
