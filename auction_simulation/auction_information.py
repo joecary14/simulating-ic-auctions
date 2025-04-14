@@ -55,9 +55,9 @@ class AuctionInformation:
     
     def run_auction_one_period(
         self,
-        bids_by_generator : np.ndarray,
+        bids_by_generator : pl.DataFrame,
         capacity_offered : float,
-        capacity_by_generator : np.ndarray
+        capacity_by_generator : pl.DataFrame
     ) -> tuple[dict[str, float], float]:
         if capacity_offered == 0:
             return {i : 0 for i in range(len(bids_by_generator))}

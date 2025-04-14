@@ -16,7 +16,7 @@ def run_simulations(
     generator_id: int,
     risk_aversion: float
 ):
-    profits_by_sim = run_day_simulations(
+    daily_returns_by_sim = run_day_simulations(
         date,
         number_of_simulations,
         number_of_generators,
@@ -30,20 +30,20 @@ def run_simulations(
     )
     
     utility = calculate_utility(
-        profits_by_sim,
+        daily_returns_by_sim,
         risk_aversion
     )
     
     return utility
 
 def calculate_utility(
-    profits_by_sim: np.ndarray,
+    daily_returns_by_sim: np.ndarray,
     risk_aversion: float
 ) -> float:
-    mean_profit = profits_by_sim.mean()
-    variance_profit = profits_by_sim.var()
+    mean_return = daily_returns_by_sim.mean()
+    variance_return = daily_returns_by_sim.var()
     
-    utility = mean_profit - risk_aversion * variance_profit
+    utility = mean_return - risk_aversion * variance_return
     
     return utility
     
@@ -62,9 +62,9 @@ def run_day_simulations(
     
     forecast_one_day = forecast_one_ic.filter(pl.col(ct.ColumnNames.DATE.value) == date)
     covariance_matrix = day_simulation.get_covariance_matrix(forecast_one_day)
-    profits = []
+    daily_returns = []
     for i in range(number_of_simulations):
-        profits_one_sim = day_simulation.simulate_day(
+        daily_return_one_sim = day_simulation.simulate_day(
             forecast_one_day,
             covariance_matrix,
             number_of_generators,
@@ -75,8 +75,8 @@ def run_day_simulations(
             generator_capacity,
             generator_id
         )
-        profits.append(profits_one_sim)
+        daily_returns.append(daily_return_one_sim)
     
-    profits_array = np.array(profits)
+    daily_returns_array = np.array(daily_returns)
     
-    return profits_array
+    return daily_returns_array

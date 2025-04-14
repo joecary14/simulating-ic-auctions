@@ -11,6 +11,8 @@ def run(
     generator_capacity : float,
     risk_aversion : float,
     optimisation_tolerance : float,
+    initial_random_evaluations : int,
+    number_of_optimisation_iterations : int,
     output_filepath : str
 ) -> None:
     raw_data_dfs = excel_interaction.read_in_excel_data(read_in_filepath)
@@ -27,7 +29,9 @@ def run(
             generator_marginal_cost,
             generator_capacity,
             risk_aversion,
-            optimisation_tolerance
+            optimisation_tolerance,
+            initial_random_evaluations,
+            number_of_optimisation_iterations
         )
         clearing_prices_by_ic[str] = clearing_prices
     

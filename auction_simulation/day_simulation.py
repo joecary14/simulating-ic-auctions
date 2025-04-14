@@ -24,14 +24,14 @@ def simulate_day(
         bid_capacity_by_generator,
         generator_marginal_cost
     )
-    profits_for_generator = calculate_daily_profit_for_generator_one_sim(
+    daily_generator_return = calculate_daily_return_for_generator_one_sim(
         generator_id,
         auction_information_one_day,
         generator_capacity,
         generator_marginal_cost
     )
     
-    return profits_for_generator
+    return daily_generator_return
 
 def get_auction_information_one_sim(
     forecast_prices_with_errors_one_day : pl.DataFrame,
@@ -103,12 +103,12 @@ def get_bids_by_generator(
 ):
     option_values = np.maximum(export_market_prices - domestic_market_prices, 0)
     option_values[export_market_prices <= generator_marginal_cost] = 0
-    
-    bid_prices = {str(generator_id) : alpha_by_generator[generator_id] + beta_by_generator[generator_id] * option_values[int(generator_id)] for generator_id in alpha_by_generator.keys()}
+    #Bid prices must be non-negative
+    bid_prices = {str(generator_id) : max(alpha_by_generator[generator_id] + beta_by_generator[generator_id] * option_values[int(generator_id)], 0) for generator_id in alpha_by_generator.keys()}
    
     return bid_prices
 
-def calculate_daily_profit_for_generator_one_sim(
+def calculate_daily_return_for_generator_one_sim(
     generator_id : str,
     auction_information_one_sim : auction_information.AuctionInformation,
     generator_capacity : int,
@@ -124,13 +124,23 @@ def calculate_daily_profit_for_generator_one_sim(
     
     domestic_prices[domestic_prices < generator_marginal_cost] = 0
     foreign_prices[foreign_prices < generator_marginal_cost] = 0
-    net_foreign_prices = foreign_prices - clearing_prices
     
-    profit_one_sim_by_period = capacity_for_domestic_market * domestic_prices + auction_results_for_generator * net_foreign_prices
+    domestic_generation_costs = [generator_marginal_cost if price >= generator_marginal_cost else 0 for price in domestic_prices]
+    foreign_generation_costs = [generator_marginal_cost if price >= generator_marginal_cost else 0 for price in foreign_prices]
+    foreign_capacity_costs = [clearing_prices[i] if auction_results_for_generator[i] > 0 else 0 for i in range(len(auction_results_for_generator))]
+    total_foreign_costs = np.array(foreign_generation_costs) + np.array(foreign_capacity_costs)
     
-    daily_profit = profit_one_sim_by_period.sum()
+    revenue_one_sim_by_period = capacity_for_domestic_market * domestic_prices + auction_results_for_generator * foreign_prices
+    costs_one_sim_by_period = capacity_for_domestic_market * domestic_generation_costs + auction_results_for_generator * total_foreign_costs
     
-    return daily_profit
+    daily_revenue = revenue_one_sim_by_period.sum()
+    daily_costs = costs_one_sim_by_period.sum()
+    if daily_costs == 0:
+        return 0
+    
+    daily_return = (daily_revenue - daily_costs) / daily_costs
+    
+    return daily_return
 
 def get_covariance_matrix(
     forecast_prices_with_errors_one_day : pl.DataFrame

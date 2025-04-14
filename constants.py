@@ -9,6 +9,7 @@ ic_name_to_source_country_dict = {
 
 class ColumnNames(Enum):
     AVAILABLE_CAPACITY = "available_capacity"
+    CLEARING_PRICE = "clearing_price"
     DATE = "date"
     DELIVERY_PERIOD = "delivery_period"
     DOMESTIC_FORECAST_ERROR = "domestic_forecast_error"

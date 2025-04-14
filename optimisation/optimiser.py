@@ -3,7 +3,8 @@ import numpy as np
 import constants as ct
 import auction_simulation.simulation_engine as simulation_engine
 
-from scipy.optimize import minimize
+from bayes_opt import BayesianOptimization
+import time
 
 def run_optimisation_for_day(
     date: str,
@@ -13,7 +14,9 @@ def run_optimisation_for_day(
     generator_capacity: float,
     number_of_generators: int,
     risk_aversion: float,
-    optimisation_tolerance: float
+    optimisation_tolerance: float,
+    initial_random_evaluations: int,
+    number_of_optimisation_iterations: int
 ) -> np.ndarray:
     initial_alpha = {str(i) : 0 for i in range(number_of_generators)}
     initial_beta = {str(i) : 1 for i in range(number_of_generators)}
@@ -27,7 +30,10 @@ def run_optimisation_for_day(
     bid_capacity_by_generator = initial_capacity_bids.clone()
     
     while not converged:
-        utility_changes = []
+        utility_changes_by_generator = {str(i) : optimisation_tolerance for i in range(number_of_generators)}
+        #Test Code
+        start_time = time.time()
+        #End test code
         for i in range(number_of_generators):
             utility = simulation_engine.run_simulations(
                 date,
@@ -43,7 +49,7 @@ def run_optimisation_for_day(
                 risk_aversion
             )
         
-            new_strategy = optimise_strategy(
+            new_alpha, new_beta = optimise_strategy(
                 date,
                 number_of_simulations,
                 number_of_generators,
@@ -54,15 +60,15 @@ def run_optimisation_for_day(
                 generator_marginal_cost,
                 generator_capacity,
                 str(i),
-                risk_aversion
+                risk_aversion,
+                initial_random_evaluations,
+                number_of_optimisation_iterations
             )
             
             candidate_alpha_by_generator = alpha_by_generator.copy()
             candidate_beta_by_generator = beta_by_generator.copy()
-            candidate_bid_capacity_by_generator = bid_capacity_by_generator
-            candidate_alpha_by_generator[i] = new_strategy[0]
-            candidate_beta_by_generator[i] = new_strategy[1]
-            candidate_bid_capacity_by_generator[i] = new_strategy[2]
+            candidate_alpha_by_generator[str(i)] = new_alpha
+            candidate_beta_by_generator[str(i)] = new_beta
             
             new_utility = simulation_engine.run_simulations(
                 date,
@@ -71,7 +77,7 @@ def run_optimisation_for_day(
                 forecast_one_ic_one_day,
                 candidate_alpha_by_generator,
                 candidate_beta_by_generator,
-                candidate_bid_capacity_by_generator,
+                bid_capacity_by_generator,
                 generator_marginal_cost,
                 generator_capacity,
                 str(i),
@@ -79,19 +85,24 @@ def run_optimisation_for_day(
             )
             
             if new_utility > utility:
-                alpha_by_generator[i] = new_strategy[0]
-                beta_by_generator[i] = new_strategy[1]
-                bid_capacity_by_generator[i] = new_strategy[2]
+                alpha_by_generator[str(i)] = new_alpha
+                beta_by_generator[str(i)] = new_beta
             
-            utility_changes.append(utility)
+            utility_changes_by_generator[str(i)] = new_utility-utility
 
-        if all(change < optimisation_tolerance for change in utility_changes):
+        if all(abs(change) < optimisation_tolerance for change in utility_changes_by_generator.values()):
             converged = True
+    #Test Code
+        end_time = time.time()
+        difference = end_time - start_time
+        print(f"Time taken {difference} seconds")
     
-    return alpha_by_generator, beta_by_generator, bid_capacity_by_generator
+    return alpha_by_generator, beta_by_generator
 
+#For now, only optimising the values alpha and beta, assuming a fixed capacity bid into the auction. May relax this later
 def objective_function(
-    strategy_vector: np.ndarray,
+    alpha: float,
+    beta: float,
     date: str,
     number_of_simulations: int,
     number_of_generators: int,
@@ -106,12 +117,8 @@ def objective_function(
 ) -> float:
     candidate_alpha_by_generator = alpha_by_generator.copy()
     candidate_beta_by_generator = beta_by_generator.copy()
-    candidate_bid_capacity_by_generator = bid_capacity_by_generator.clone()
-    candidate_alpha_by_generator[generator_id] = strategy_vector[0]
-    candidate_beta_by_generator[generator_id] = strategy_vector[1]
-    candidate_bid_capacity_by_generator = candidate_bid_capacity_by_generator.with_columns(
-        pl.Series(name=str(generator_id), values=strategy_vector[2:])
-    )
+    candidate_alpha_by_generator[generator_id] = alpha
+    candidate_beta_by_generator[generator_id] = beta
     
     utility = simulation_engine.run_simulations(
         date,
@@ -120,14 +127,14 @@ def objective_function(
         forecast_one_ic,
         candidate_alpha_by_generator,
         candidate_beta_by_generator,
-        candidate_bid_capacity_by_generator,
+        bid_capacity_by_generator,
         generator_marginal_cost,
         generator_capacity,
         generator_id,
         risk_aversion
     )
     
-    return -utility  # Minimize the negative utility to maximize the utility
+    return utility  #BayesianOptimization maxmises the objective
         
 def optimise_strategy(
     date: str,
@@ -141,23 +148,47 @@ def optimise_strategy(
     generator_capacity: float,
     generator_id: str,
     risk_aversion: float,
-) -> np.ndarray:
+    initial_random_evaluations: int,
+    number_of_optimisation_iterations: int
+) -> tuple[float, float]:
     
-    initial_strategy = np.concatenate([
-        [alpha_by_generator[generator_id]],
-        [beta_by_generator[generator_id]],
-        bid_capacity_by_generator.select(pl.col(str(generator_id))).to_numpy().flatten()
-    ])
+    pbounds = {
+        'alpha': (-5, 5),
+        'beta': (0, 2)
+    }
     
-    result = minimize(
-        objective_function,
-        x0 = initial_strategy,
-        args=(date, number_of_simulations, number_of_generators, forecast_one_ic, generator_marginal_cost, generator_capacity, generator_id, risk_aversion, alpha_by_generator, beta_by_generator, bid_capacity_by_generator),
-        method="Nelder-Mead"
+    def bo_objective(alpha, beta):
+        return objective_function(
+            alpha,
+            beta,
+            date,
+            number_of_simulations,
+            number_of_generators,
+            forecast_one_ic,
+            generator_marginal_cost,
+            generator_capacity,
+            generator_id,
+            risk_aversion,
+            alpha_by_generator,
+            beta_by_generator,
+            bid_capacity_by_generator
+        )
+        
+    optimizer = BayesianOptimization(
+        f=bo_objective,
+        pbounds=pbounds,
+        random_state=42,
+        verbose=1
     )
     
-    if not result.success:
-        return None
-    else:
-        return result.x
+    optimizer.maximize(
+        init_points=initial_random_evaluations,
+        n_iter=number_of_optimisation_iterations
+    )
+    
+    best_params = optimizer.max['params']
+    best_alpha = best_params['alpha']
+    best_beta = best_params['beta']
+    
+    return best_alpha, best_beta
         
