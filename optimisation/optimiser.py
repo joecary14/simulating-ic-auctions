@@ -15,8 +15,8 @@ def run_optimisation_for_day(
     risk_aversion: float,
     optimisation_tolerance: float
 ) -> np.ndarray:
-    initial_alpha = {i : 0 for i in range(number_of_generators)}
-    initial_beta = {i : 1 for i in range(number_of_generators)}
+    initial_alpha = {str(i) : 0 for i in range(number_of_generators)}
+    initial_beta = {str(i) : 1 for i in range(number_of_generators)}
     initial_generator_capacity = [generator_capacity/5 for _ in range(len(forecast_one_ic_one_day[ct.ColumnNames.DELIVERY_PERIOD.value]))]
     initial_capacity_bids = {str(i) : initial_generator_capacity for i in range(number_of_generators)}
     initial_capacity_bids[ct.ColumnNames.DELIVERY_PERIOD.value] = forecast_one_ic_one_day[ct.ColumnNames.DELIVERY_PERIOD.value]
@@ -39,7 +39,7 @@ def run_optimisation_for_day(
                 bid_capacity_by_generator,
                 generator_marginal_cost,
                 generator_capacity,
-                i,
+                str(i),
                 risk_aversion
             )
         
@@ -53,7 +53,7 @@ def run_optimisation_for_day(
                 forecast_one_ic_one_day,
                 generator_marginal_cost,
                 generator_capacity,
-                i,
+                str(i),
                 risk_aversion
             )
             
@@ -74,7 +74,7 @@ def run_optimisation_for_day(
                 candidate_bid_capacity_by_generator,
                 generator_marginal_cost,
                 generator_capacity,
-                i,
+                str(i),
                 risk_aversion
             )
             
@@ -98,7 +98,7 @@ def objective_function(
     forecast_one_ic: pl.DataFrame,
     generator_marginal_cost: float,
     generator_capacity: float,
-    generator_id: int,
+    generator_id: str,
     risk_aversion: float,
     alpha_by_generator: dict[int, float],
     beta_by_generator: dict[int, float],
@@ -106,10 +106,12 @@ def objective_function(
 ) -> float:
     candidate_alpha_by_generator = alpha_by_generator.copy()
     candidate_beta_by_generator = beta_by_generator.copy()
-    candidate_bid_capacity_by_generator = bid_capacity_by_generator.copy()
+    candidate_bid_capacity_by_generator = bid_capacity_by_generator.clone()
     candidate_alpha_by_generator[generator_id] = strategy_vector[0]
     candidate_beta_by_generator[generator_id] = strategy_vector[1]
-    candidate_bid_capacity_by_generator[generator_id] = strategy_vector[2:]
+    candidate_bid_capacity_by_generator = candidate_bid_capacity_by_generator.with_columns(
+        pl.Series(name=str(generator_id), values=strategy_vector[2:])
+    )
     
     utility = simulation_engine.run_simulations(
         date,
@@ -131,25 +133,26 @@ def optimise_strategy(
     date: str,
     number_of_simulations: int,
     number_of_generators: int,
-    alpha_by_generator: dict[int, float],
-    beta_by_generator: dict[int, float],
+    alpha_by_generator: dict[str, float],
+    beta_by_generator: dict[str, float],
     bid_capacity_by_generator: pl.DataFrame,
     forecast_one_ic: pl.DataFrame,
     generator_marginal_cost: float,
     generator_capacity: float,
-    generator_id: int,
+    generator_id: str,
     risk_aversion: float,
 ) -> np.ndarray:
-    initial_strategy = (
-        alpha_by_generator[generator_id],
-        beta_by_generator[generator_id],
-        bid_capacity_by_generator[generator_id].to_numpy()
-    )
+    
+    initial_strategy = np.concatenate([
+        [alpha_by_generator[generator_id]],
+        [beta_by_generator[generator_id]],
+        bid_capacity_by_generator.select(pl.col(str(generator_id))).to_numpy().flatten()
+    ])
     
     result = minimize(
         objective_function,
         x0 = initial_strategy,
-        args=(date, number_of_simulations, number_of_generators, forecast_one_ic, generator_marginal_cost, generator_capacity, generator_id, risk_aversion),
+        args=(date, number_of_simulations, number_of_generators, forecast_one_ic, generator_marginal_cost, generator_capacity, generator_id, risk_aversion, alpha_by_generator, beta_by_generator, bid_capacity_by_generator),
         method="Nelder-Mead"
     )
     

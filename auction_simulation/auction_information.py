@@ -20,40 +20,45 @@ class AuctionInformation:
         
     def run_auction(
         self
-    ) -> tuple[pl.DataFrame, pl.DataFrame]:
-        results = {}
-        clearing_prices = {}
-        periods = self.bids_by_generator_by_period[ct.ColumnNames.DELIVERY_PERIOD.value].to_numpy()
-
+    ) -> tuple[dict[str, np.ndarray], np.ndarray]:
+        periods = self.bids_by_generator_by_period[ct.ColumnNames.DELIVERY_PERIOD.value].unique().sort()
+        num_periods = len(periods)
+        first_period = periods[0]
+        first_period_bids = self.bids_by_generator_by_period.filter(
+            pl.col(ct.ColumnNames.DELIVERY_PERIOD.value) == first_period
+        ).drop(ct.ColumnNames.DELIVERY_PERIOD.value)
+        generator_ids = first_period_bids.columns
+        results_by_generator = {str(generator_id): np.zeros(num_periods) for generator_id in generator_ids}
+        clearing_prices = np.zeros(num_periods)
+        
         for period_idx, period in enumerate(periods):
             bids_by_generator = self.bids_by_generator_by_period.filter(
                 pl.col(ct.ColumnNames.DELIVERY_PERIOD.value) == period
             ).drop(ct.ColumnNames.DELIVERY_PERIOD.value)
+            
             capacity_by_generator = self.capacity_by_generator_by_period.filter(
                 pl.col(ct.ColumnNames.DELIVERY_PERIOD.value) == period
             ).drop(ct.ColumnNames.DELIVERY_PERIOD.value)
+            
             capacity_offered = self.capacity_offered[period_idx]
-
             accepted_bids, clearing_price = self.run_auction_one_period(
-            bids_by_generator,
-            capacity_offered,
-            capacity_by_generator
+                bids_by_generator,
+                capacity_offered,
+                capacity_by_generator
             )
-
-            results[period] = accepted_bids
-            clearing_prices[period] = clearing_price
-#TODO the format in which this is being saved is getting mangled
-        accepted_capacity_by_generator = pl.DataFrame(results)
-        clearing_prices = pl.DataFrame(clearing_prices)
-
-        return accepted_capacity_by_generator, clearing_prices
+            clearing_prices[period_idx] = clearing_price
+            
+            for generator_id, accepted_capacity in accepted_bids.items():
+                results_by_generator[generator_id][period_idx] = accepted_capacity
+        
+        return results_by_generator, clearing_prices
     
     def run_auction_one_period(
         self,
         bids_by_generator : np.ndarray,
         capacity_offered : float,
         capacity_by_generator : np.ndarray
-    ) -> tuple[dict[int, float], float]:
+    ) -> tuple[dict[str, float], float]:
         if capacity_offered == 0:
             return {i : 0 for i in range(len(bids_by_generator))}
         bids = self.create_bids(

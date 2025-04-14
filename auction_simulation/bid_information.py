@@ -1,9 +1,9 @@
 class BidInformation:
     def __init__(
         self,
-        id,
-        bid_price,
-        bid_capacity
+        id : int,
+        bid_price : float,
+        bid_capacity : float
     ):
         self.id = id
         self.bid_price = bid_price

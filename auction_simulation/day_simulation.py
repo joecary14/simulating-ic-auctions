@@ -12,7 +12,8 @@ def simulate_day(
     bid_capacity_by_generator : pl.DataFrame,
     generator_marginal_cost : float,
     generator_capacity : int,
-) -> pl.DataFrame:
+    generator_id : str
+) -> float:
     
     auction_information_one_day = get_auction_information_one_sim(
         forecast_prices_with_errors_one_day,
@@ -23,13 +24,14 @@ def simulate_day(
         bid_capacity_by_generator,
         generator_marginal_cost
     )
-    profits_by_generator = calculate_profit_by_generator_one_sim(
+    profits_for_generator = calculate_daily_profit_for_generator_one_sim(
+        generator_id,
         auction_information_one_day,
         generator_capacity,
         generator_marginal_cost
     )
     
-    return profits_by_generator
+    return profits_for_generator
 
 def get_auction_information_one_sim(
     forecast_prices_with_errors_one_day : pl.DataFrame,
@@ -95,25 +97,27 @@ def get_auction_information_one_sim(
 def get_bids_by_generator(
     export_market_prices: np.ndarray,
     domestic_market_prices: np.ndarray,
-    alpha_by_generator: dict[str, float],
-    beta_by_generator: dict[str, float],
+    alpha_by_generator: dict[int, float],
+    beta_by_generator: dict[int, float],
     generator_marginal_cost: float
 ):
     option_values = np.maximum(export_market_prices - domestic_market_prices, 0)
     option_values[export_market_prices <= generator_marginal_cost] = 0
     
-    bid_prices = {str(generator_id) : alpha_by_generator[generator_id] + beta_by_generator[generator_id] * option_values[generator_id] for generator_id in alpha_by_generator.keys()}
+    bid_prices = {str(generator_id) : alpha_by_generator[generator_id] + beta_by_generator[generator_id] * option_values[int(generator_id)] for generator_id in alpha_by_generator.keys()}
    
     return bid_prices
 
-def calculate_profit_by_generator_one_sim(
+def calculate_daily_profit_for_generator_one_sim(
+    generator_id : str,
     auction_information_one_sim : auction_information.AuctionInformation,
     generator_capacity : int,
     generator_marginal_cost : float,
 ) -> pl.DataFrame:
     
     auction_results, clearing_prices = auction_information_one_sim.run_auction()
-    capacity_for_domestic_market = generator_capacity - auction_results
+    auction_results_for_generator = auction_results[generator_id]
+    capacity_for_domestic_market = generator_capacity - auction_results_for_generator
     
     domestic_prices = auction_information_one_sim.actual_domestic_prices.copy()
     foreign_prices = auction_information_one_sim.actual_foreign_prices.copy()
@@ -122,17 +126,11 @@ def calculate_profit_by_generator_one_sim(
     foreign_prices[foreign_prices < generator_marginal_cost] = 0
     net_foreign_prices = foreign_prices - clearing_prices
     
-    profits_by_generator = (
-        capacity_for_domestic_market * domestic_prices
-        + auction_results * net_foreign_prices
-    )
+    profit_one_sim_by_period = capacity_for_domestic_market * domestic_prices + auction_results_for_generator * net_foreign_prices
     
-    daily_profits = profits_by_generator.sum(axis=0)
-    generator_ids = auction_results.columns
+    daily_profit = profit_one_sim_by_period.sum()
     
-    profits_df = pl.DataFrame({col : profit for col, profit in zip(generator_ids, daily_profits)})
-        
-    return profits_df
+    return daily_profit
 
 def get_covariance_matrix(
     forecast_prices_with_errors_one_day : pl.DataFrame
