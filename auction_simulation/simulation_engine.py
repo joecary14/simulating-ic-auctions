@@ -13,7 +13,7 @@ def run_simulations(
     bid_capacity_by_generator: pl.DataFrame,
     generator_marginal_cost: float,
     generator_capacity: float,
-    generator_id: int,
+    generator_id: str,
     risk_aversion: float
 ):
     daily_returns_by_sim = run_day_simulations(
@@ -35,6 +35,39 @@ def run_simulations(
     )
     
     return utility
+
+def get_utility_by_generator(
+    date: str,
+    number_of_simulations: int,
+    number_of_generators: int,
+    forecast_one_ic: pl.DataFrame,
+    alpha_by_generator: dict[str, float],
+    beta_by_generator: dict[str, float],
+    bid_capacity_by_generator: pl.DataFrame,
+    generator_marginal_cost: float,
+    generator_capacity: float,
+    risk_aversion: float
+) -> dict[str, float]:
+    
+    utility_by_generator = {}
+    
+    for generator_id in range(number_of_generators):
+        utility = run_simulations(
+            date,
+            number_of_simulations,
+            number_of_generators,
+            forecast_one_ic,
+            alpha_by_generator,
+            beta_by_generator,
+            bid_capacity_by_generator,
+            generator_marginal_cost,
+            generator_capacity,
+            str(generator_id),
+            risk_aversion
+        )
+        utility_by_generator[str(generator_id)] = utility
+    
+    return utility_by_generator
 
 def calculate_utility(
     daily_returns_by_sim: np.ndarray,
@@ -61,10 +94,10 @@ def run_day_simulations(
 ) -> np.ndarray:
     
     forecast_one_day = forecast_one_ic.filter(pl.col(ct.ColumnNames.DATE.value) == date)
-    covariance_matrix = day_simulation.get_covariance_matrix(forecast_one_day)
-    daily_returns = []
+    covariance_matrix = day_simulation.get_covariance_matrix_from_df(forecast_one_day)
+    daily_returns_array = np.zeros(number_of_simulations)
     for i in range(number_of_simulations):
-        daily_return_one_sim = day_simulation.simulate_day(
+        daily_returns_one_sim = day_simulation.simulate_day(
             forecast_one_day,
             covariance_matrix,
             number_of_generators,
@@ -75,8 +108,6 @@ def run_day_simulations(
             generator_capacity,
             generator_id
         )
-        daily_returns.append(daily_return_one_sim)
-    
-    daily_returns_array = np.array(daily_returns)
+        daily_returns_array[i] = daily_returns_one_sim
     
     return daily_returns_array

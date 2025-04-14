@@ -23,3 +23,6 @@ class ColumnNames(Enum):
     FOREIGN_PRICE = "foreign_price"
     ROLLING_CORRELATION = "rolling_correlation"
     
+class NumericalConstants(Enum):
+    DEFAULT_UTILITY = -1e10
+    

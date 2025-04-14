@@ -1,3 +1,4 @@
+import functools
 import polars as pl
 import numpy as np
 import constants as ct
@@ -104,7 +105,13 @@ def get_bids_by_generator(
     option_values = np.maximum(export_market_prices - domestic_market_prices, 0)
     option_values[export_market_prices <= generator_marginal_cost] = 0
     #Bid prices must be non-negative
-    bid_prices = {str(generator_id) : max(alpha_by_generator[generator_id] + beta_by_generator[generator_id] * option_values[int(generator_id)], 0) for generator_id in alpha_by_generator.keys()}
+    bid_prices = {}
+    for generator_id in alpha_by_generator:
+        idx = int(generator_id)
+        bid_prices[str(generator_id)] = max(
+            alpha_by_generator[generator_id] + beta_by_generator[generator_id] * option_values[idx], 
+            0
+        )
    
     return bid_prices
 
@@ -113,7 +120,7 @@ def calculate_daily_return_for_generator_one_sim(
     auction_information_one_sim : auction_information.AuctionInformation,
     generator_capacity : int,
     generator_marginal_cost : float,
-) -> pl.DataFrame:
+) -> float:
     
     auction_results, clearing_prices = auction_information_one_sim.run_auction()
     auction_results_for_generator = auction_results[generator_id]
@@ -125,10 +132,10 @@ def calculate_daily_return_for_generator_one_sim(
     domestic_prices[domestic_prices < generator_marginal_cost] = 0
     foreign_prices[foreign_prices < generator_marginal_cost] = 0
     
-    domestic_generation_costs = [generator_marginal_cost if price >= generator_marginal_cost else 0 for price in domestic_prices]
-    foreign_generation_costs = [generator_marginal_cost if price >= generator_marginal_cost else 0 for price in foreign_prices]
-    foreign_capacity_costs = [clearing_prices[i] if auction_results_for_generator[i] > 0 else 0 for i in range(len(auction_results_for_generator))]
-    total_foreign_costs = np.array(foreign_generation_costs) + np.array(foreign_capacity_costs)
+    domestic_generation_costs = np.where(domestic_prices > 0, generator_marginal_cost, 0)
+    foreign_generation_costs = np.where(foreign_prices > 0, generator_marginal_cost, 0)
+    foreign_capacity_costs = np.where(auction_results_for_generator > 0, clearing_prices, 0)
+    total_foreign_costs = foreign_generation_costs + foreign_capacity_costs
     
     revenue_one_sim_by_period = capacity_for_domestic_market * domestic_prices + auction_results_for_generator * foreign_prices
     costs_one_sim_by_period = capacity_for_domestic_market * domestic_generation_costs + auction_results_for_generator * total_foreign_costs
@@ -142,18 +149,25 @@ def calculate_daily_return_for_generator_one_sim(
     
     return daily_return
 
+@functools.lru_cache(maxsize=128)
 def get_covariance_matrix(
-    forecast_prices_with_errors_one_day : pl.DataFrame
-) -> dict[str, np.ndarray]:
+    forecast_error_correlation: float,
+    domestic_stdev: float,
+    foreign_stdev: float
+) -> np.ndarray:
+    corr_matrix = np.array([
+        [1.0, forecast_error_correlation],
+        [forecast_error_correlation, 1.0]
+    ])
+    std_vector = np.array([domestic_stdev, foreign_stdev])
+    return np.outer(std_vector, std_vector) * corr_matrix
+
+# Then update the original function:
+def get_covariance_matrix_from_df(forecast_prices_with_errors_one_day: pl.DataFrame) -> np.ndarray:
     forecast_error_correlation = forecast_prices_with_errors_one_day[ct.ColumnNames.FORECAST_ERROR_CORRELATIONS.value][0]
     domestic_stdev = forecast_prices_with_errors_one_day[ct.ColumnNames.DOMESTIC_FORECAST_ERROR_STDEV.value][0]
     foreign_stdev = forecast_prices_with_errors_one_day[ct.ColumnNames.FOREIGN_FORECAST_ERROR_STDEV.value][0]
     
-    corr_matrix = np.array([
-    [1.0, forecast_error_correlation],
-    [forecast_error_correlation, 1.0]
-    ])
-    std_vector = np.array([domestic_stdev, foreign_stdev])
-    cov_matrix = np.outer(std_vector, std_vector) * corr_matrix
+    covariance_matrix = get_covariance_matrix(forecast_error_correlation, domestic_stdev, foreign_stdev)
     
-    return cov_matrix
+    return covariance_matrix

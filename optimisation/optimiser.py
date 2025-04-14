@@ -4,7 +4,6 @@ import constants as ct
 import auction_simulation.simulation_engine as simulation_engine
 
 from bayes_opt import BayesianOptimization
-import time
 
 def run_optimisation_for_day(
     date: str,
@@ -28,12 +27,9 @@ def run_optimisation_for_day(
     alpha_by_generator = initial_alpha.copy()
     beta_by_generator = initial_beta.copy()
     bid_capacity_by_generator = initial_capacity_bids.clone()
+    utility_by_generator = {str(i) : ct.NumericalConstants.DEFAULT_UTILITY.value for i in range(number_of_generators)}
     
     while not converged:
-        utility_changes_by_generator = {str(i) : optimisation_tolerance for i in range(number_of_generators)}
-        #Test Code
-        start_time = time.time()
-        #End test code
         for i in range(number_of_generators):
             utility = simulation_engine.run_simulations(
                 date,
@@ -88,14 +84,25 @@ def run_optimisation_for_day(
                 alpha_by_generator[str(i)] = new_alpha
                 beta_by_generator[str(i)] = new_beta
             
-            utility_changes_by_generator[str(i)] = new_utility-utility
-
-        if all(abs(change) < optimisation_tolerance for change in utility_changes_by_generator.values()):
-            converged = True
-    #Test Code
-        end_time = time.time()
-        difference = end_time - start_time
-        print(f"Time taken {difference} seconds")
+        new_utility_by_generator = simulation_engine.get_utility_by_generator(
+            date,
+            number_of_simulations,
+            number_of_generators,
+            forecast_one_ic_one_day,
+            alpha_by_generator,
+            beta_by_generator,
+            bid_capacity_by_generator,
+            generator_marginal_cost,
+            generator_capacity,
+            risk_aversion
+        )
+        
+        utility_changes_by_generator = [new_utility_by_generator[str(i)] - utility_by_generator[str(i)] for i in range(number_of_generators)]
+            
+        if all(abs(change) < optimisation_tolerance for change in utility_changes_by_generator):
+             converged = True
+        else:
+            utility_by_generator = new_utility_by_generator.copy()
     
     return alpha_by_generator, beta_by_generator
 

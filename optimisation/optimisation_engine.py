@@ -33,7 +33,6 @@ def run_optimisation(
         delivery_periods = forecast_one_ic[ct.ColumnNames.DELIVERY_PERIOD.value]
         clearing_prices_by_day.append(clearing_prices)
         
-        
         clearing_prices_df = pl.DataFrame(
             {
                 ct.ColumnNames.DATE.value: [date] * len(clearing_prices),
@@ -73,7 +72,7 @@ def get_results_one_day(
         number_of_optimisation_iterations
     )
     
-    covariance_matrix_by_period = day_simulation.get_covariance_matrix(forecast_one_ic)
+    covariance_matrix_by_period = day_simulation.get_covariance_matrix_from_df(forecast_one_ic)
     initial_generator_capacity = [generator_capacity/5 for _ in range(len(forecast_one_ic[ct.ColumnNames.DELIVERY_PERIOD.value]))]
     initial_capacity_bids = {str(i) : initial_generator_capacity for i in range(number_of_generators)}
     initial_capacity_bids[ct.ColumnNames.DELIVERY_PERIOD.value] = forecast_one_ic[ct.ColumnNames.DELIVERY_PERIOD.value]
