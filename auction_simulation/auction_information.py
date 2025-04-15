@@ -59,7 +59,7 @@ class AuctionInformation:
         capacity_by_generator : pl.DataFrame
     ) -> tuple[dict[str, float], float]:
         if capacity_offered == 0:
-            return {i : 0 for i in range(len(bids_by_generator))}
+            return {i : 0 for i in range(len(bids_by_generator))}, 0
         
         bid_prices = np.array([bids_by_generator[generator_id][0] for generator_id in bids_by_generator.columns])
         bid_capacities = np.array([capacity_by_generator[generator_id][0] for generator_id in capacity_by_generator.columns])

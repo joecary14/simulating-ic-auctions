@@ -10,7 +10,7 @@ risk_aversion = 1
 optimisation_tolerance = 0.1
 initial_random_evaluations = 10
 number_of_optimisation_iterations = 10
-output_filepath = '/Users/josephcary/Library/CloudStorage/OneDrive-Nexus365/First Year/Papers/Interconnection/Raw Data/One Year Test 2.xlsx'
+output_filepath = '/Users/josephcary/Library/CloudStorage/OneDrive-Nexus365/First Year/Papers/Interconnection/Code Testing/BO Test.xlsx'
 
 def main():
     engine.run(

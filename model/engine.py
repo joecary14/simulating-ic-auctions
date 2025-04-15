@@ -34,6 +34,7 @@ def run(
             number_of_optimisation_iterations
         )
         clearing_prices_by_ic[str] = clearing_prices
+        print(f"Clearing prices for {str} calculated.")
     
     excel_interaction.write_data_to_excel(
         clearing_prices_by_ic,

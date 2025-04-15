@@ -32,6 +32,7 @@ def run_optimisation(
         )
         delivery_periods = forecast_one_ic[ct.ColumnNames.DELIVERY_PERIOD.value]
         clearing_prices_by_day.append(clearing_prices)
+        print(f"Clearing prices for {date} calculated.")
         
         clearing_prices_df = pl.DataFrame(
             {
