@@ -22,6 +22,7 @@ class ColumnNames(Enum):
     FOREIGN_FORECAST_ERROR_STDEV = "foreign_forecast_error_stdev"
     FOREIGN_PRICE = "foreign_price"
     ROLLING_CORRELATION = "rolling_correlation"
+    SETTLEMENT_PERIOD = "settlement_period"
     
 class NumericalConstants(Enum):
     DEFAULT_UTILITY = -1e10
