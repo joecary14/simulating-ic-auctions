@@ -26,6 +26,5 @@ def main():
         number_of_optimisation_iterations,
         output_filepath
     )
-    
-    
+     
 main()
