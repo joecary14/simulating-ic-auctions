@@ -6,6 +6,11 @@ from datetime import datetime, timedelta, timezone
 
 gb_timezone = pytz.timezone('Europe/London')
 
+def get_start_and_end_dates_from_year(year, convert_datetime_to_string=False):
+    start_date = datetime(year, 1, 1)
+    end_date = datetime(year, 12, 31)
+    return start_date, end_date
+
 def get_settlement_dates_and_settlement_periods_per_day(start_date_str, end_date_str, convert_datetime_to_string):
     full_date_list = generate_settlement_dates(start_date_str, end_date_str)
     dates_with_settlement_periods_per_day = get_settlement_periods_for_each_day_in_date_range(full_date_list)

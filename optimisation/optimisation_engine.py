@@ -78,6 +78,7 @@ def get_results_one_day(
     initial_capacity_bids = {str(i) : initial_generator_capacity for i in range(number_of_generators)}
     initial_capacity_bids[ct.ColumnNames.DELIVERY_PERIOD.value] = forecast_one_ic[ct.ColumnNames.DELIVERY_PERIOD.value]
     initial_capacity_bids = pl.DataFrame(initial_capacity_bids)
+    #TODO - may want to do a detrminnistic final auction here using the expectation values of the forecast, since this is what they would use
     auction_information_one_day = day_simulation.get_auction_information_one_sim(
         forecast_one_ic,
         covariance_matrix_by_period,
