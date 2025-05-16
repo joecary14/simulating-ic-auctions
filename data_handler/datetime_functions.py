@@ -6,13 +6,13 @@ from datetime import datetime, timedelta, timezone
 
 gb_timezone = pytz.timezone('Europe/London')
 
-def get_start_and_end_dates_from_year(year, convert_datetime_to_string=False):
+def get_start_and_end_dates_from_year(year):
     start_date = datetime(year, 1, 1)
     end_date = datetime(year, 12, 31)
     return start_date, end_date
 
-def get_settlement_dates_and_settlement_periods_per_day(start_date_str, end_date_str, convert_datetime_to_string):
-    full_date_list = generate_settlement_dates(start_date_str, end_date_str)
+def get_settlement_dates_and_settlement_periods_per_day(start_date, end_date, convert_datetime_to_string):
+    full_date_list = generate_settlement_dates(start_date, end_date)
     dates_with_settlement_periods_per_day = get_settlement_periods_for_each_day_in_date_range(full_date_list)
     if convert_datetime_to_string:
         dates_with_settlement_periods_per_day = {key.strftime('%Y-%m-%d'): value 
@@ -27,13 +27,7 @@ def get_list_of_settlement_dates_and_periods(settlement_dates_with_periods_per_d
             
     return settlement_dates_and_periods
 
-def generate_settlement_dates(start_date_str, end_date_str, format_date_time_as_string = False):
-    try:
-        start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-        end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
-    except ValueError as e:
-        raise ValueError("Incorrect date format, should be YYYY-MM-DD") from e
-
+def generate_settlement_dates(start_date, end_date, format_date_time_as_string = False):
     date_list = [(start_date + timedelta(days=i)) for i in range((end_date - start_date).days + 1)]
     
     if format_date_time_as_string:

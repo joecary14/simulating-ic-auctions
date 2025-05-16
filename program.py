@@ -1,4 +1,6 @@
+import asyncio
 import model.engine as engine
+import price_forecaster.data_collection as data_collection
 
 read_in_filepath = '/Users/josephcary/Library/CloudStorage/OneDrive-Nexus365/First Year/Papers/Interconnection/Raw Data/One Year Test.xlsx'
 rolling_window_days = 30
@@ -12,19 +14,7 @@ initial_random_evaluations = 10
 number_of_optimisation_iterations = 10
 output_filepath = '/Users/josephcary/Library/CloudStorage/OneDrive-Nexus365/First Year/Papers/Interconnection/Code Testing/BO Test.xlsx'
 
-def main():
-    engine.run(
-        read_in_filepath,
-        rolling_window_days,
-        number_of_simulations,
-        number_of_generators,
-        generator_marginal_cost,
-        generator_capacity,
-        risk_aversion,
-        optimisation_tolerance,
-        initial_random_evaluations,
-        number_of_optimisation_iterations,
-        output_filepath
-    )
+async def main():
+    await data_collection.get_elexon_lear_data_for_year(2023)
      
-main()
+asyncio.run(main())

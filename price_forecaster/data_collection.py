@@ -10,8 +10,8 @@ async def get_elexon_lear_data_for_year(
 ) -> dict[str, pd.DataFrame]:
     start_date, end_date = datetime_functions.get_start_and_end_dates_from_year(year)
     settlement_dates_with_periods_per_day = datetime_functions.get_settlement_dates_and_settlement_periods_per_day(
-        start_date_str=start_date,
-        end_date_str=end_date,
+        start_date=start_date,
+        end_date=end_date,
         convert_datetime_to_string=True,
     )
     api_client = ApiClient()
@@ -21,7 +21,7 @@ async def get_elexon_lear_data_for_year(
     demand_forecasts = await elexon_interaction.get_latest_actionable_forecasts_for_date_range(
         settlement_dates_with_periods_per_day=settlement_dates_with_periods_per_day,
         api_function=demand_forecast_api.forecast_demand_daily_evolution_get
-    )
+    ) #TODO - may be easiest to use this end point for demand https://bmrs.elexon.co.uk/api-documentation/endpoint/forecast/demand/day-ahead/history
     
     wind_forecasts = await elexon_interaction.get_latest_actionable_forecasts_for_date_range(
         settlement_dates_with_periods_per_day=settlement_dates_with_periods_per_day,
