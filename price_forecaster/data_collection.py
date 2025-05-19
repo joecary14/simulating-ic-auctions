@@ -15,19 +15,59 @@ async def get_elexon_lear_data_for_year(
         convert_datetime_to_string=True,
     )
     api_client = ApiClient()
-    demand_forecast_api = DemandForecastApi(api_client)
-    generation_forecast_api = GenerationForecastApi(api_client)
     
-    demand_forecasts = await elexon_interaction.get_latest_actionable_forecasts_for_date_range(
-        settlement_dates_with_periods_per_day=settlement_dates_with_periods_per_day,
-        api_function=demand_forecast_api.forecast_demand_daily_evolution_get
-    ) #TODO - may be easiest to use this end point for demand https://bmrs.elexon.co.uk/api-documentation/endpoint/forecast/demand/day-ahead/history
-    
-    wind_forecasts = await elexon_interaction.get_latest_actionable_forecasts_for_date_range(
-        settlement_dates_with_periods_per_day=settlement_dates_with_periods_per_day,
-        api_function=generation_forecast_api.forecast_generation_wind_evolution_get
+    demand_forecast_df = await elexon_interaction.get_latest_actionable_demand_forecast_for_date_range(
+        settlement_dates_with_periods_per_day,
+        api_client
+    )
+
+    wind_forecast_df = await elexon_interaction.get_latest_wind_forecast(
+        settlement_dates_with_periods_per_day,
+        api_client
     )
     
-    return demand_forecasts, wind_forecasts
+    combined_forecasts = combine_values(
+        demand_forecast_df,
+        wind_forecast_df
+    )
     
+    return combined_forecasts
     
+def combine_values(
+    demand_forecast_df: pd.DataFrame,
+    wind_forecast_df: pd.DataFrame,
+):
+    # Fill NA values with the value from the row above
+    demand_forecast_df = demand_forecast_df.fillna(method='ffill')
+
+    # Ensure the index is a datetime if not already
+    if not pd.api.types.is_datetime64_any_dtype(demand_forecast_df.index):
+        demand_forecast_df.index = pd.to_datetime(demand_forecast_df.index)
+
+    # Resample to hourly by averaging the value at the hour and the next half hour
+    hourly_index = demand_forecast_df.index[demand_forecast_df.index.minute == 0]
+    hourly_values = []
+    for dt in hourly_index:
+        try:
+            val1 = demand_forecast_df.loc[dt].values
+            val2 = demand_forecast_df.loc[dt + pd.Timedelta(minutes=30)].values
+            avg = (val1 + val2) / 2
+            hourly_values.append(avg)
+        except KeyError:
+            continue  # skip if half-hour data is missing
+
+    hourly_df = pd.DataFrame(
+        data=[v.flatten() for v in hourly_values],
+        index=hourly_index[:len(hourly_values)],
+        columns=demand_forecast_df.columns
+    )
+
+    combined_df = pd.merge(
+        hourly_df,
+        wind_forecast_df,
+        on='start_time',
+        how='inner',
+        suffixes=('_demand', '_wind')
+    )
+    
+    return combined_df
