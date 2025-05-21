@@ -1,7 +1,5 @@
 import pandas as pd
 from elexonpy.api_client import ApiClient
-from elexonpy.api.demand_forecast_api import DemandForecastApi
-from elexonpy.api.generation_forecast_api import GenerationForecastApi
 import data_handler.datetime_functions as datetime_functions
 import data_handler.elexon_interaction as elexon_interaction
 
@@ -37,14 +35,10 @@ def combine_values(
     demand_forecast_df: pd.DataFrame,
     wind_forecast_df: pd.DataFrame,
 ):
-    # Fill NA values with the value from the row above
-    demand_forecast_df = demand_forecast_df.fillna(method='ffill')
+    demand_forecast_df = demand_forecast_df.ffill()
+    demand_forecast_df = demand_forecast_df.set_index('start_time')
+    demand_forecast_df.index = pd.to_datetime(demand_forecast_df.index)
 
-    # Ensure the index is a datetime if not already
-    if not pd.api.types.is_datetime64_any_dtype(demand_forecast_df.index):
-        demand_forecast_df.index = pd.to_datetime(demand_forecast_df.index)
-
-    # Resample to hourly by averaging the value at the hour and the next half hour
     hourly_index = demand_forecast_df.index[demand_forecast_df.index.minute == 0]
     hourly_values = []
     for dt in hourly_index:
@@ -54,13 +48,17 @@ def combine_values(
             avg = (val1 + val2) / 2
             hourly_values.append(avg)
         except KeyError:
-            continue  # skip if half-hour data is missing
+            continue
 
     hourly_df = pd.DataFrame(
         data=[v.flatten() for v in hourly_values],
         index=hourly_index[:len(hourly_values)],
         columns=demand_forecast_df.columns
     )
+    
+    hourly_df = hourly_df.reset_index().rename(columns={'index': 'start_time'})
+    hourly_df['start_time'] = pd.to_datetime(hourly_df['start_time']).dt.tz_localize('UTC')
+    wind_forecast_df['start_time'] = pd.to_datetime(wind_forecast_df['start_time'])
 
     combined_df = pd.merge(
         hourly_df,
@@ -69,5 +67,6 @@ def combine_values(
         how='inner',
         suffixes=('_demand', '_wind')
     )
+    combined_df = combined_df.rename(columns={'generation': 'wind_generation_forecast'})
     
     return combined_df
