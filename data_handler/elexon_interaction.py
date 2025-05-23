@@ -126,16 +126,23 @@ async def get_latest_wind_forecast(
         end_date_time = settlement_date + 'T23:30Z'
         if result_df.empty:
             wind_data_df = await get_missing_wind_data_for_day(
-                settlement_date,
+                start_date_time,
+                end_date_time,
                 generation_api
             )
         
         else:
-            #TODO - there's a problem here. We're getting non-empty result_df, but this is spitting out empty wind_data_df - for example, 2021-02-17
             result_df['start_time'] = pd.to_datetime(result_df['start_time'])
             forecast_df = result_df[result_df['start_time'] <= end_date_time]
             forecast_df = forecast_df[forecast_df['start_time'] >= start_date_time]
-            wind_data_df = forecast_df[['start_time', 'generation']]
+            if forecast_df.empty:
+                wind_data_df = await get_missing_wind_data_for_day(
+                    start_date_time,
+                    end_date_time,
+                    generation_api
+                )
+            else:
+                wind_data_df = forecast_df[['start_time', 'generation']]
         
         wind_forecasts.append(wind_data_df)
     
@@ -158,11 +165,17 @@ async def get_missing_wind_data_for_day(
     )
     
     if actual_generation_df.empty:
-        return pd.DataFrame(columns=['start_time', 'wind_generation'])
+        return pd.DataFrame(columns=['start_time', 'generation'])
 
     wind_generation_df = actual_generation_df[actual_generation_df['business_type'] == 'Wind generation']
     grouped = wind_generation_df.groupby('start_time')['quantity'].sum().reset_index()
     grouped.rename(columns={'quantity': 'wind_generation'}, inplace=True)
+    grouped['start_time'] = pd.to_datetime(grouped['start_time'])
+    grouped['hour'] = grouped['start_time'].dt.floor('h')
+    hourly = grouped.groupby('hour')['wind_generation'].mean().reset_index()
+    hourly.rename(columns={'hour': 'start_time', 'wind_generation' : 'generation'}, inplace=True)
+
+    grouped = hourly
     
     return grouped
 

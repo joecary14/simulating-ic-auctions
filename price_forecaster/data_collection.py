@@ -11,7 +11,7 @@ async def get_data_for_lear_forecast(
     country_id: str,
     output_filepath: str
 ) -> None:
-    forecast_data = await get_elexon_data_for_years(
+    elexon_forecast_data = await get_elexon_data_for_years(
         years
     )
     
@@ -24,33 +24,33 @@ async def get_data_for_lear_forecast(
         country_id
     )
     
-    # Merge the dataframes on the 'datetime' column
     merged_df = pd.merge(
         price_spread_data,
         demand_forecast_data,
         on='datetime',
-        how='inner'
+        how='left'
     )
     merged_df = pd.merge(
         merged_df,
-        forecast_data,
+        elexon_forecast_data,
         left_on='datetime',
         right_on='start_time',
-        how='inner'
+        how='left'
     )
-    # Drop the duplicate 'start_time' column if present
     if 'start_time' in merged_df.columns:
         merged_df = merged_df.drop(columns=['start_time'])
-
-    # Reorder columns so spread is first, then the rest
+        
+    merged_df = merged_df[merged_df['datetime'].dt.year.isin(years)]
     spread_cols = [col for col in merged_df.columns if col.startswith('GB-')]
     other_cols = [col for col in merged_df.columns if col not in spread_cols + ['datetime']]
     merged_df = merged_df[['datetime'] + spread_cols + other_cols]
+    merged_df = merged_df.sort_values('datetime').reset_index(drop=True)
+    merged_df = merged_df.set_index('datetime')
+    merged_df = merged_df.ffill(limit=24)
+    merged_df = merged_df.combine_first(merged_df.shift(24))
+    merged_df = merged_df.reset_index()
 
-    # Save to output file
     merged_df.to_csv(output_filepath, index=False)
-    
-    return forecast_data
     
 def get_price_spread_data(
     read_in_filepath: str,
@@ -97,7 +97,7 @@ def read_in_demand_forecast_data(
     for date, row in df.iterrows():
         if not isinstance(date, pd.Timestamp):
             try:
-                date = pd.to_datetime(date)
+                date = pd.to_datetime(date, dayfirst=True)
             except:
                 print(f"Skipping invalid date: {date}")
                 continue
@@ -111,7 +111,7 @@ def read_in_demand_forecast_data(
                     dt = date.replace(hour=hour, minute=0, second=0)
                     result.append({
                         'datetime': dt,
-                        'value': value
+                        'fr_demand_forecast': value
                     })
                 except:
                     print(f"Skipping invalid hour: {hour} for date {date}")
@@ -168,37 +168,19 @@ async def get_elexon_lear_data_for_year(
 def combine_values(
     demand_forecast_df: pd.DataFrame,
     wind_forecast_df: pd.DataFrame,
-):
-    demand_forecast_df = demand_forecast_df.ffill()
-    demand_forecast_df = demand_forecast_df.set_index('start_time')
-    demand_forecast_df.index = pd.to_datetime(demand_forecast_df.index)
-
-    hourly_index = demand_forecast_df.index[demand_forecast_df.index.minute == 0]
-    hourly_values = []
-    for dt in hourly_index:
-        try:
-            val1 = demand_forecast_df.loc[dt].values
-            val2 = demand_forecast_df.loc[dt + pd.Timedelta(minutes=30)].values
-            avg = (val1 + val2) / 2
-            hourly_values.append(avg)
-        except KeyError:
-            continue
-
-    hourly_df = pd.DataFrame(
-        data=[v.flatten() for v in hourly_values],
-        index=hourly_index[:len(hourly_values)],
-        columns=demand_forecast_df.columns
-    )
-    
-    hourly_df = hourly_df.reset_index().rename(columns={'index': 'start_time'})
-    hourly_df['start_time'] = pd.to_datetime(hourly_df['start_time']).dt.tz_localize('UTC')
+):    
+    demand_forecast_df['start_time'] = pd.to_datetime(demand_forecast_df['start_time'])
+    demand_forecast_df['hour'] = demand_forecast_df['start_time'].dt.floor('h')
+    hourly_demand_forecast_data = demand_forecast_df.groupby('hour')['tsdf'].mean().reset_index()
+    hourly_demand_forecast_data.rename(columns={'hour': 'start_time'}, inplace=True)
+    hourly_demand_forecast_data['start_time'] = pd.to_datetime(hourly_demand_forecast_data['start_time']).dt.tz_localize('UTC')
     wind_forecast_df['start_time'] = pd.to_datetime(wind_forecast_df['start_time'])
 
     combined_df = pd.merge(
-        hourly_df,
+        hourly_demand_forecast_data,
         wind_forecast_df,
         on='start_time',
-        how='inner',
+        how='left',
         suffixes=('_demand', '_wind')
     )
     combined_df = combined_df.rename(columns={'generation': 'wind_generation_forecast'})
