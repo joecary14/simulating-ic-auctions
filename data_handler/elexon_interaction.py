@@ -29,6 +29,7 @@ async def get_latest_actionable_demand_forecast_for_date_range(
         gather_tasks.append(asyncio.to_thread(task.get))
     results = await asyncio.gather(*gather_tasks)
     processed_results = []
+    missing_points = 0
     i = 0
     for key in tasks.keys():
         settlement_date = key
@@ -36,27 +37,37 @@ async def get_latest_actionable_demand_forecast_for_date_range(
         result_df = results[i]
         settlement_periods_in_day_list = [settlement_period for settlement_period in range(1, settlement_dates_with_periods_per_day[settlement_date] + 1)]
         for settlement_period in settlement_periods_in_day_list:
-            result_one_sp_df = result_df[result_df['settlement_period'] == settlement_period]
-            if result_one_sp_df.empty:
+            if result_df.empty:
                 start_time, tsdf = await get_missing_demand_data_point(
                     demand_api,
                     settlement_date,
                     settlement_period
                 )
-            
+                missing_points += 1
             else:
-                start_time = pd.to_datetime(result_one_sp_df['start_time'].values[0])
-                valid_forecasts = result_one_sp_df[result_one_sp_df['publish_time'] <= cutoff_time]
-                if valid_forecasts.empty:
+                result_one_sp_df = result_df[result_df['settlement_period'] == settlement_period]
+                if result_one_sp_df.empty:
                     start_time, tsdf = await get_missing_demand_data_point(
                         demand_api,
                         settlement_date,
                         settlement_period
                     )
-                    
+                    missing_points += 1
+                
                 else:
-                    closest_forecast = valid_forecasts.loc[valid_forecasts['publish_time'].idxmax()] #Should be a pandas series
-                    tsdf = closest_forecast['transmission_system_demand']
+                    start_time = pd.to_datetime(result_one_sp_df['start_time'].values[0])
+                    valid_forecasts = result_one_sp_df[result_one_sp_df['publish_time'] <= cutoff_time]
+                    if valid_forecasts.empty:
+                        start_time, tsdf = await get_missing_demand_data_point(
+                            demand_api,
+                            settlement_date,
+                            settlement_period
+                        )
+                        missing_points += 1
+                        
+                    else:
+                        closest_forecast = valid_forecasts.loc[valid_forecasts['publish_time'].idxmax()] #Should be a pandas series
+                        tsdf = closest_forecast['transmission_system_demand']
             
             
             data = (start_time, tsdf)
@@ -120,6 +131,7 @@ async def get_latest_wind_forecast(
             )
         
         else:
+            #TODO - there's a problem here. We're getting non-empty result_df, but this is spitting out empty wind_data_df - for example, 2021-02-17
             result_df['start_time'] = pd.to_datetime(result_df['start_time'])
             forecast_df = result_df[result_df['start_time'] <= end_date_time]
             forecast_df = forecast_df[forecast_df['start_time'] >= start_date_time]
