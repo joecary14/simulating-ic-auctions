@@ -14,12 +14,12 @@ import time
 import pickle as pc
 import os
 
-import tensorflow.keras as kr
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Dense, Input, Dropout, AlphaDropout, BatchNormalization
-from tensorflow.keras.regularizers import l2, l1
-from tensorflow.keras.layers import LeakyReLU, PReLU
-import tensorflow.keras.backend as K
+import keras as kr
+from keras.api.models import Model
+from keras.api.layers import Dense, Input, Dropout, AlphaDropout, BatchNormalization
+from keras.api.regularizers import l2, l1
+from keras.api.layers import LeakyReLU, PReLU
+import keras.api.backend as K
 
 from epftoolbox.evaluation import MAE, sMAPE
 from epftoolbox.data import scaling

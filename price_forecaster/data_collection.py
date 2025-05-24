@@ -55,6 +55,11 @@ async def get_data_for_lear_forecast(
     other_cols = [col for col in merged_df.columns if col not in spread_cols + ['datetime']]
     merged_df = merged_df[['datetime'] + spread_cols + other_cols]
     merged_df = merged_df.sort_values('datetime').reset_index(drop=True)
+    spread_col = [col for col in merged_df.columns if col.startswith('GB-')][0]
+    merged_df = merged_df.rename(columns={spread_col: 'price'})
+    exog_cols = [col for col in merged_df.columns if col not in ['datetime', 'price']]
+    exog_rename = {col: f'Exogenous {i+1}' for i, col in enumerate(exog_cols)}
+    merged_df = merged_df.rename(columns=exog_rename)
 
     merged_df.to_csv(output_file_directory + output_filename, index=False)
     

@@ -207,6 +207,7 @@ class LEAR(object):
         Xtrain = np.zeros([indexTrain.shape[0], n_features])
         Xtest = np.zeros([indexTest.shape[0], n_features])
         Ytrain = np.zeros([indexTrain.shape[0], 24])
+        Ytest = np.zeros([indexTest.shape[0], 24])
 
         # Index that 
         feature_index = 0
@@ -280,9 +281,10 @@ class LEAR(object):
             futureIndexTest = pd.to_datetime(indexTest.loc[:, 'h' + str(hour)].values)
 
             # Extracting Y value based on time indexs
-            Ytrain[:, hour] = df_train.loc[futureIndexTrain, 'Price']        
+            Ytrain[:, hour] = df_train.loc[futureIndexTrain, 'Price']
+            Ytest[:, hour] = df_test.loc[futureIndexTest, 'Price']        
 
-        return Xtrain, Ytrain, Xtest
+        return Xtrain, Ytrain, Xtest, Ytest
 
 
     def recalibrate_and_forecast_next_day(self, df, calibration_window, next_day_date):
@@ -302,7 +304,7 @@ class LEAR(object):
             Calibration window (in days) for the LEAR model.
         
         next_day_date : datetime
-            Date of the day-ahead.
+            Date of the day-ahead.-
         
         Returns
         -------
@@ -321,13 +323,13 @@ class LEAR(object):
 
 
         # Generating X,Y pairs for predicting prices
-        Xtrain, Ytrain, Xtest, = self._build_and_split_XYs(
+        Xtrain, Ytrain, Xtest, Ytest = self._build_and_split_XYs(
             df_train=df_train, df_test=df_test, date_test=next_day_date)
 
         # Recalibrating the LEAR model and extracting the prediction
         Yp = self.recalibrate_predict(Xtrain=Xtrain, Ytrain=Ytrain, Xtest=Xtest)
 
-        return Yp
+        return Yp, Ytest
 
 
 def evaluate_lear_in_test_dataset(path_datasets_folder=os.path.join('.', 'datasets'), 
