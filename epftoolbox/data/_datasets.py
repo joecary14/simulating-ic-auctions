@@ -116,8 +116,7 @@ def read_data(path, dataset='PJM', years_test=2, begin_test_date=None, end_test_
             data.to_csv(file_path)
     else:
         try:
-            file_path = os.path.join(path, dataset + '.csv')
-            data = pd.read_csv(file_path, index_col=0)
+            data = pd.read_csv(path, index_col=0)
         except IOError as e:
             raise IOError("%s: %s" % (path, e.strerror))
 
@@ -157,6 +156,8 @@ def read_data(path, dataset='PJM', years_test=2, begin_test_date=None, end_test_
                 raise Exception("End date for test dataset should be at 0h or 23h") 
 
         print('Test datasets: {} - {}'.format(begin_test_date, end_test_date))
+        begin_test_date = begin_test_date.tz_localize('UTC') if begin_test_date.tzinfo is None else begin_test_date.tz_convert('UTC')
+        end_test_date = end_test_date.tz_localize('UTC') if end_test_date.tzinfo is None else end_test_date.tz_convert('UTC')
         df_train = data.loc[:begin_test_date - pd.Timedelta(hours=1), :]
         df_test = data.loc[begin_test_date:end_test_date, :]
 
