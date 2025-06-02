@@ -317,4 +317,4 @@ def hyperparameter_optimizer(path_datasets_folder=os.path.join('.', 'datasets'),
                              data_augmentation=data_augmentation, calibration_window=calibration_window,
                              n_exogenous_inputs=n_exogenous_inputs)
 
-    fmin(fmin_objective, space=space, algo=tpe.suggest, max_evals=max_evals, trials=trials, verbose=False)
+    fmin(fmin_objective, space=space, algo=tpe.suggest, max_evals=max_evals, trials=trials, verbose=True)

@@ -112,7 +112,7 @@ class DNNModel(object):
             opt = 'adam'
         else:
             if optimizer == 'adam':
-                opt = kr.optimizers.Adam(lr=lr, clipvalue=10000)
+                opt = kr.optimizers.Adam(learning_rate=lr, clipvalue=10000)
             if optimizer == 'RMSprop':
                 opt = kr.optimizers.RMSprop(lr=lr, clipvalue=10000)
             if optimizer == 'adagrad':
@@ -161,20 +161,19 @@ class DNNModel(object):
         for k, neurons in enumerate(self.neurons):
 
             if self.activation == 'LeakyReLU':
-                past_Dense = Dense(neurons, activation='linear', batch_input_shape=inputShape,
+                past_Dense = Dense(neurons, activation='linear',
                                    kernel_initializer=self.initializer,
                                    kernel_regularizer=self._reg(self.lambda_reg))(past_Dense)
                 past_Dense = LeakyReLU(alpha=.001)(past_Dense)
 
             elif self.activation == 'PReLU':
-                past_Dense = Dense(neurons, activation='linear', batch_input_shape=inputShape,
+                past_Dense = Dense(neurons, activation='linear',
                                    kernel_initializer=self.initializer,
                                    kernel_regularizer=self._reg(self.lambda_reg))(past_Dense)
                 past_Dense = PReLU()(past_Dense)
 
             else:
                 past_Dense = Dense(neurons, activation=self.activation,
-                                   batch_input_shape=inputShape,
                                    kernel_initializer=self.initializer,
                                    kernel_regularizer=self._reg(self.lambda_reg))(past_Dense)
 
@@ -268,7 +267,7 @@ class DNNModel(object):
             start_time = time.time()
 
             self.model.fit(trainX, trainY, batch_size=192,
-                           epochs=1, verbose=False, shuffle=True)
+                           epochs=1, verbose=True, shuffle=True)
 
             # Updating epoch metrics and displaying useful information
             if self.verbose:

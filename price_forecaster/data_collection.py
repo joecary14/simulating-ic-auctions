@@ -4,7 +4,7 @@ from elexonpy.api_client import ApiClient
 import data_handler.datetime_functions as datetime_functions
 import data_handler.elexon_interaction as elexon_interaction
 
-async def get_data_for_lear_forecast(
+async def get_data_for_fr_lear_forecast(
     demand_data_filepath: str,
     price_data_filepath: str,
     years: list[int],
@@ -16,7 +16,7 @@ async def get_data_for_lear_forecast(
         years
     )
     
-    demand_forecast_data = read_in_demand_forecast_data(
+    demand_forecast_data = read_in_fr_demand_forecast_data(
         demand_data_filepath
     )
     
@@ -56,8 +56,8 @@ async def get_data_for_lear_forecast(
     merged_df = merged_df[['datetime'] + spread_cols + other_cols]
     merged_df = merged_df.sort_values('datetime').reset_index(drop=True)
     spread_col = [col for col in merged_df.columns if col.startswith('GB-')][0]
-    merged_df = merged_df.rename(columns={spread_col: 'price'})
-    exog_cols = [col for col in merged_df.columns if col not in ['datetime', 'price']]
+    merged_df = merged_df.rename(columns={spread_col: 'Price'})
+    exog_cols = [col for col in merged_df.columns if col not in ['datetime', 'Price']]
     exog_rename = {col: f'Exogenous {i+1}' for i, col in enumerate(exog_cols)}
     merged_df = merged_df.rename(columns=exog_rename)
 
@@ -86,8 +86,8 @@ def get_price_spread_data(
         'datetime': df[datetime_col]
     }
     for col in other_cols:
-        # Extract country code as the two uppercase letters not in brackets
-        country_code = ''.join([c for c in col if c.isupper() and c != 'G' and c != 'B'])[:2]
+        # Extract the first complete string (before the first space)
+        country_code = col.split()[0]
 
         spread_col_name = f"GB-{country_code}"
         spread_data[spread_col_name] = df[gb_col] - df[col]
@@ -100,7 +100,7 @@ def get_price_spread_data(
     
     return spread_df
 
-def read_in_demand_forecast_data(
+def read_in_fr_demand_forecast_data(
     read_in_filepath: str
 ) -> pd.DataFrame:
     df = pd.read_excel(read_in_filepath, index_col=0)
@@ -141,7 +141,7 @@ def read_in_demand_forecast_data(
 
 async def get_elexon_data_for_years(
     years: list[int]
-) -> None:
+) -> pd.DataFrame   :
     tasks = [get_elexon_lear_data_for_year(year) for year in years]
     results = await asyncio.gather(*tasks)
     combined_forecasts = pd.concat(results, axis=0)
@@ -212,3 +212,216 @@ def populate_missing_values_with_day_before_values(
             )
         else:
             return
+
+async def get_data_for_be_lear_forecast(
+    be_demand_data_filepath: str,
+    price_data_filepath: str,
+    years: list[int],
+    country_id: str,
+    output_file_directory: str,
+    output_filename: str
+) -> None:
+    elexon_forecast_data = await get_elexon_data_for_years(
+        years
+    )
+    
+    demand_forecast_data = read_in_be_demand_forecast_data(
+        be_demand_data_filepath
+    )
+    
+    price_spread_data = get_price_spread_data(
+        price_data_filepath,
+        country_id
+    )
+    
+    merged_df = pd.merge(
+        price_spread_data,
+        demand_forecast_data,
+        on='datetime',
+        how='left'
+    )
+    merged_df = pd.merge(
+        merged_df,
+        elexon_forecast_data,
+        left_on='datetime',
+        right_on='start_time',
+        how='left'
+    )
+    if 'start_time' in merged_df.columns:
+        merged_df = merged_df.drop(columns=['start_time'])
+        
+    merged_df = merged_df.set_index('datetime').sort_index()
+    merged_df = merged_df[merged_df.index.year.isin(years)]
+    for col in merged_df.columns:
+        populate_missing_values_with_day_before_values(
+            col,
+            merged_df
+        )
+    merged_df = merged_df.reset_index()
+        
+    merged_df = merged_df[merged_df['datetime'].dt.year.isin(years)]
+    spread_cols = [col for col in merged_df.columns if col.startswith('GB-')]
+    other_cols = [col for col in merged_df.columns if col not in spread_cols + ['datetime']]
+    merged_df = merged_df[['datetime'] + spread_cols + other_cols]
+    merged_df = merged_df.sort_values('datetime').reset_index(drop=True)
+    spread_col = [col for col in merged_df.columns if col.startswith('GB-')][0]
+    merged_df = merged_df.rename(columns={spread_col: 'price'})
+    exog_cols = [col for col in merged_df.columns if col not in ['datetime', 'price']]
+    exog_rename = {col: f'Exogenous {i+1}' for i, col in enumerate(exog_cols)}
+    merged_df = merged_df.rename(columns=exog_rename)
+
+    merged_df.to_csv(output_file_directory + output_filename, index=False)
+
+def read_in_be_demand_forecast_data(
+    read_in_filepath: str
+) -> pd.DataFrame:
+    df = pd.read_excel(read_in_filepath)
+    df['datetime'] = pd.to_datetime(df['datetime'], utc=True)
+    df = df.sort_values('datetime')
+    df = df.set_index('datetime')
+    hourly_df = df.resample('h').mean()
+    hourly_df = hourly_df.reset_index()
+    hourly_df['datetime'] = hourly_df['datetime'].dt.tz_convert('UTC').dt.floor('h')
+
+    return hourly_df
+
+def get_data_for_dk1_lear_forecast(
+    dk1_res_forecast_data: str,
+    elexon_data_filepath: str,
+    price_data_filepath: str,
+    years: list[int],
+    country_id: str,
+    output_file_directory: str,
+    output_filename: str
+) -> None:
+    elexon_forecast_data = pd.read_excel(elexon_data_filepath)
+    elexon_forecast_data['datetime'] = pd.to_datetime(elexon_forecast_data['datetime'], utc=True)
+    
+    res_forecast_data = read_in_dk1_forecast_data(
+        dk1_res_forecast_data
+    )
+    
+    price_spread_data = get_price_spread_data(
+        price_data_filepath,
+        country_id
+    )
+    
+    merged_df = pd.merge(
+        price_spread_data,
+        res_forecast_data,
+        on='datetime',
+        how='left'
+    )
+    merged_df = pd.merge(
+        merged_df,
+        elexon_forecast_data,
+        left_on='datetime',
+        right_on='datetime',
+        how='left'
+    )
+    if 'start_time' in merged_df.columns:
+        merged_df = merged_df.drop(columns=['start_time'])
+        
+    merged_df = merged_df.set_index('datetime').sort_index()
+    merged_df = merged_df[merged_df.index.year.isin(years)]
+    for col in merged_df.columns:
+        populate_missing_values_with_day_before_values(
+            col,
+            merged_df
+        )
+    merged_df = merged_df.reset_index()
+        
+    merged_df = merged_df[merged_df['datetime'].dt.year.isin(years)]
+    spread_cols = [col for col in merged_df.columns if col.startswith('GB-')]
+    other_cols = [col for col in merged_df.columns if col not in spread_cols + ['datetime']]
+    merged_df = merged_df[['datetime'] + spread_cols + other_cols]
+    merged_df = merged_df.sort_values('datetime').reset_index(drop=True)
+    spread_col = [col for col in merged_df.columns if col.startswith('GB-')][0]
+    merged_df = merged_df.rename(columns={spread_col: 'Price'})
+    exog_cols = [col for col in merged_df.columns if col not in ['datetime', 'Price']]
+    exog_rename = {col: f'Exogenous {i+1}' for i, col in enumerate(exog_cols)}
+    merged_df = merged_df.rename(columns=exog_rename)
+
+    merged_df.to_csv(output_file_directory + output_filename, index=False)
+
+def read_in_dk1_forecast_data(
+    read_in_filepath: str
+) -> pd.DataFrame:
+    
+    df = pd.read_excel(read_in_filepath)
+    df = df[df['PriceArea'] == 'DK1']
+    df['HourUTC'] = pd.to_datetime(df['HourUTC'], utc=True)
+    hourly_sum = df.groupby('HourUTC')['ForecastDayAhead'].sum().reset_index()
+    hourly_sum = hourly_sum.rename(columns={'ForecastDayAhead': 'RES_forecast', 'HourUTC': 'datetime'})
+    return hourly_sum
+
+def get_data_for_nl_lear_forecast(
+    nl_forecast_data_filepath: str,
+    elexon_data_filepath: str,
+    price_data_filepath: str,
+    years: list[int],
+    country_id: str,
+    output_file_directory: str,
+    output_filename: str
+) -> None:
+    elexon_forecast_data = pd.read_excel(elexon_data_filepath)
+    elexon_forecast_data['datetime'] = pd.to_datetime(elexon_forecast_data['datetime'], utc=True)
+    nl_forecast_data = read_in_nl_forecast_data(
+        nl_forecast_data_filepath
+    )
+    
+    price_spread_data = get_price_spread_data(
+        price_data_filepath,
+        country_id
+    )
+    
+    merged_df = pd.merge(
+        price_spread_data,
+        nl_forecast_data,
+        on='datetime',
+        how='left'
+    )
+    merged_df = pd.merge(
+        merged_df,
+        elexon_forecast_data,
+        left_on='datetime',
+        right_on='datetime',
+        how='left'
+    )
+    if 'start_time' in merged_df.columns:
+        merged_df = merged_df.drop(columns=['start_time'])
+    
+    merged_df = merged_df.set_index('datetime').sort_index()
+    merged_df = merged_df[merged_df.index.year.isin(years)]
+    for col in merged_df.columns:
+        populate_missing_values_with_day_before_values(
+            col,
+            merged_df
+        )
+    merged_df = merged_df.reset_index()
+        
+    merged_df = merged_df[merged_df['datetime'].dt.year.isin(years)]
+    spread_cols = [col for col in merged_df.columns if col.startswith('GB-')]
+    other_cols = [col for col in merged_df.columns if col not in spread_cols + ['datetime']]
+    merged_df = merged_df[['datetime'] + spread_cols + other_cols]
+    merged_df = merged_df.sort_values('datetime').reset_index(drop=True)
+    spread_col = [col for col in merged_df.columns if col.startswith('GB-')][0]
+    merged_df = merged_df.rename(columns={spread_col: 'Price'})
+    exog_cols = [col for col in merged_df.columns if col not in ['datetime', 'Price']]
+    exog_rename = {col: f'Exogenous {i+1}' for i, col in enumerate(exog_cols)}
+    merged_df = merged_df.rename(columns=exog_rename)
+
+    merged_df.to_csv(output_file_directory + output_filename, index=False)
+
+def read_in_nl_forecast_data(
+    read_in_filepath: str
+) -> pd.DataFrame:
+    df = pd.read_excel(read_in_filepath)
+    df['datetime'] = pd.to_datetime(df['datetime'], format="%d.%m.%Y %H:%M",utc=True)
+    df = df.sort_values('datetime')
+    df = df.set_index('datetime')
+    hourly_df = df.resample('h').mean()
+    hourly_df = hourly_df.reset_index()
+    hourly_df['datetime'] = hourly_df['datetime'].dt.tz_convert('UTC').dt.floor('h')
+
+    return hourly_df

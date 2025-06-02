@@ -48,6 +48,12 @@ def run_lear_forecast(
     plt.title('5-95th percentile Predicted vs Actual Scatter Plot')
     plt.grid(True)
     plt.tight_layout()
+    plt.plot(
+        [filtered_df['actual'].min(), filtered_df['actual'].max()],
+        [filtered_df['actual'].min(), filtered_df['actual'].max()],
+        color='red', linestyle='--', label='y = x'
+    )
+    plt.legend()
     plt.savefig(output_data_filepath.replace('.csv', '_scatter.png'))
     plt.close()
     
