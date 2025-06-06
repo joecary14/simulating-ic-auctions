@@ -62,6 +62,7 @@ async def get_data_for_fr_lear_forecast(
     merged_df = merged_df.rename(columns=exog_rename)
 
     merged_df.to_csv(output_file_directory + output_filename, index=False)
+    print(f"Data for FR LEAR forecast saved to {output_file_directory + output_filename}")
     
 def get_price_spread_data(
     read_in_filepath: str,
@@ -213,17 +214,17 @@ def populate_missing_values_with_day_before_values(
         else:
             return
 
-async def get_data_for_be_lear_forecast(
+def get_data_for_be_lear_forecast(
     be_demand_data_filepath: str,
+    elexon_data_filepath: str,
     price_data_filepath: str,
     years: list[int],
     country_id: str,
     output_file_directory: str,
     output_filename: str
 ) -> None:
-    elexon_forecast_data = await get_elexon_data_for_years(
-        years
-    )
+    elexon_forecast_data = pd.read_excel(elexon_data_filepath)
+    elexon_forecast_data['datetime'] = pd.to_datetime(elexon_forecast_data['datetime'], utc=True)
     
     demand_forecast_data = read_in_be_demand_forecast_data(
         be_demand_data_filepath
@@ -244,7 +245,7 @@ async def get_data_for_be_lear_forecast(
         merged_df,
         elexon_forecast_data,
         left_on='datetime',
-        right_on='start_time',
+        right_on='datetime',
         how='left'
     )
     if 'start_time' in merged_df.columns:
@@ -265,8 +266,8 @@ async def get_data_for_be_lear_forecast(
     merged_df = merged_df[['datetime'] + spread_cols + other_cols]
     merged_df = merged_df.sort_values('datetime').reset_index(drop=True)
     spread_col = [col for col in merged_df.columns if col.startswith('GB-')][0]
-    merged_df = merged_df.rename(columns={spread_col: 'price'})
-    exog_cols = [col for col in merged_df.columns if col not in ['datetime', 'price']]
+    merged_df = merged_df.rename(columns={spread_col: 'Price'})
+    exog_cols = [col for col in merged_df.columns if col not in ['datetime', 'Price']]
     exog_rename = {col: f'Exogenous {i+1}' for i, col in enumerate(exog_cols)}
     merged_df = merged_df.rename(columns=exog_rename)
 

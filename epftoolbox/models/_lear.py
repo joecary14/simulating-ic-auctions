@@ -269,6 +269,7 @@ class LEAR(object):
         # Adding the dummy variables that depend on the day of the week. Monday is 0 and Sunday is 6
         #
         # For each day of the week
+        #TODO - add in seasonality option - toggle whether we want to add it in as a bool?
         for dayofweek in range(7):
             Xtrain[indexTrain.index.dayofweek == dayofweek, feature_index] = 1
             Xtest[indexTest.index.dayofweek == dayofweek, feature_index] = 1
