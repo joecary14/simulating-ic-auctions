@@ -151,7 +151,7 @@ async def get_elexon_data_for_years(
 
 async def get_elexon_lear_data_for_year(
     year: int,
-) -> dict[str, pd.DataFrame]:
+) -> pd.DataFrame:
     start_date, end_date = datetime_functions.get_start_and_end_dates_from_year(year)
     settlement_dates_with_periods_per_day = datetime_functions.get_settlement_dates_and_settlement_periods_per_day(
         start_date=start_date,

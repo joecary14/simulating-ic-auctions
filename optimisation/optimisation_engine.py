@@ -1,94 +1,71 @@
 import numpy as np
-import polars as pl
-import constants as ct
+from scipy.stats import norm
+
+import optimisation.discretisation as discretisation
 import optimisation.optimiser as optimiser
-import auction_simulation.day_simulation as day_simulation
 
-def run_optimisation(
-    number_of_simulations: int,
-    number_of_generators: int,
-    forecasts: pl.DataFrame,
-    generator_marginal_cost: float,
-    generator_capacity: float,
-    risk_aversion: float,
-    optimisation_tolerance: float,
-    initial_random_evaluations: int,
-    number_of_optimisation_iterations: int
-) -> pl.DataFrame:
-    clearing_prices_by_day = []
-    for date in forecasts[ct.ColumnNames.DATE.value].unique():
-        forecast_one_ic = forecasts.filter(pl.col(ct.ColumnNames.DATE.value) == date)
-        clearing_prices = get_results_one_day(
-            date,
-            number_of_simulations,
-            number_of_generators,
-            forecast_one_ic,
-            generator_marginal_cost,
-            generator_capacity,
-            risk_aversion,
-            optimisation_tolerance,
-            initial_random_evaluations,
-            number_of_optimisation_iterations
-        )
-        delivery_periods = forecast_one_ic[ct.ColumnNames.DELIVERY_PERIOD.value]
-        clearing_prices_by_day.append(clearing_prices)
-        print(f"Clearing prices for {date} calculated.")
-        
-        clearing_prices_df = pl.DataFrame(
-            {
-                ct.ColumnNames.DATE.value: [date] * len(clearing_prices),
-                ct.ColumnNames.DELIVERY_PERIOD.value: delivery_periods,
-                ct.ColumnNames.CLEARING_PRICE.value: clearing_prices
-            }
-        )
-        
-        clearing_prices_by_day.append(clearing_prices_df)
-    
-    clearing_prices_df = pl.concat(clearing_prices_by_day)
-    
-    return clearing_prices_df  
 
-def get_results_one_day(
-    date: str,
-    number_of_simulations: int,
-    number_of_generators: int,
-    forecast_one_ic: pl.DataFrame,
-    generator_marginal_cost: float,
-    generator_capacity: float,
-    risk_aversion: float,
-    optimisation_tolerance: float,
-    initial_random_evaluations: int,
-    number_of_optimisation_iterations: int
-) -> np.ndarray:
-    br_alpha_by_generator, br_beta_by_generator = optimiser.run_optimisation_for_day(
-        date,
+#TODO - this is where we bring it all together
+def run_optimisation_one_period(
+    price_spread_prior_distribution,
+    conditional_observation_distribution,
+    min_prior_spread: float,
+    max_prior_spread: float,
+    number_of_value_bins: int,
+    min_observation: float,
+    max_observation: float,
+    max_bid_price: float,
+    max_bid_quantity: float,
+    number_of_price_levels: int,
+    number_of_quantitiy_levels: int,
+    capacity_offered: float,
+    number_of_bidders: int,
+    number_of_simulations: int
+):
+    discrete_price_spread = discretisation.discretise_distribution(
+        price_spread_prior_distribution,
+        number_of_value_bins,
+        min_prior_spread,
+        max_prior_spread
+    )
+    possible_prior_values = discrete_price_spread[:, 0]
+    possible_prior_probabilities = discrete_price_spread[:, 1]
+    
+    possible_observations = np.linspace(
+        min_observation,
+        max_observation,
+        number_of_value_bins
+    )
+    conditional_probabilities = []
+    for prior_value in possible_prior_values:
+        mean = prior_value
+        std_dev = 1.0
+        conditional_distribution = norm(loc=mean, scale=std_dev)
+        discrete_conditional_distribution = discretisation.discretise_distribution(
+            conditional_distribution,
+            number_of_value_bins,
+            min_observation,
+            max_observation
+        )
+        possible_observation_probabilities = discrete_conditional_distribution[:, 1]
+        conditional_probabilities.append(possible_observation_probabilities)
+    
+    conditional_probabilities_matrix = np.transpose(np.column_stack(conditional_probabilities))
+    
+    discrete_action_space = discretisation.generate_demand_schedules(
+        max_bid_price,
+        max_bid_quantity,
+        number_of_price_levels,
+        number_of_quantitiy_levels
+    )
+        
+    optimiser.soda_algorithm(
+        possible_prior_values,
+        possible_observations,
+        discrete_action_space,
+        possible_prior_probabilities,
+        conditional_probabilities_matrix,
+        number_of_bidders,
         number_of_simulations,
-        forecast_one_ic,
-        generator_marginal_cost,
-        generator_capacity,
-        number_of_generators,
-        risk_aversion,
-        optimisation_tolerance,
-        initial_random_evaluations,
-        number_of_optimisation_iterations
+        capacity_offered
     )
-    
-    covariance_matrix_by_period = day_simulation.get_covariance_matrix_from_df(forecast_one_ic)
-    initial_generator_capacity = [generator_capacity/5 for _ in range(len(forecast_one_ic[ct.ColumnNames.DELIVERY_PERIOD.value]))]
-    initial_capacity_bids = {str(i) : initial_generator_capacity for i in range(number_of_generators)}
-    initial_capacity_bids[ct.ColumnNames.DELIVERY_PERIOD.value] = forecast_one_ic[ct.ColumnNames.DELIVERY_PERIOD.value]
-    initial_capacity_bids = pl.DataFrame(initial_capacity_bids)
-    #TODO - may want to do a detrminnistic final auction here using the expectation values of the forecast, since this is what they would use
-    auction_information_one_day = day_simulation.get_auction_information_one_sim(
-        forecast_one_ic,
-        covariance_matrix_by_period,
-        number_of_generators,
-        br_alpha_by_generator,
-        br_beta_by_generator,
-        initial_capacity_bids,
-        generator_marginal_cost,
-    )
-    
-    auction_results, clearing_prices = auction_information_one_day.run_auction()
-    
-    return clearing_prices

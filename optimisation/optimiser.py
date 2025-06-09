@@ -1,201 +1,145 @@
-import polars as pl
 import numpy as np
-import constants as ct
-import auction_simulation.simulation_engine as simulation_engine
+from typing import Tuple
+import optimisation.auction as auction
 
-from bayes_opt import BayesianOptimization
-
-def run_optimisation_for_day(
-    date: str,
+def soda_algorithm(
+    V: np.ndarray, 
+    O: np.ndarray, 
+    B: list[list[tuple[float, float]]], 
+    pV: np.ndarray, 
+    gO_given_V: np.ndarray, 
+    number_of_bidders: int, 
     number_of_simulations: int,
-    forecast_one_ic_one_day: pl.DataFrame,
-    generator_marginal_cost: float,
-    generator_capacity: float,
-    number_of_generators: int,
-    risk_aversion: float,
-    optimisation_tolerance: float,
-    initial_random_evaluations: int,
-    number_of_optimisation_iterations: int
+    capacity_offered: float,
+    max_iter: int = 1000, 
+    tol: float=1e-6
+):
+    """
+    SODA Algorithm for Computing Distributional Strategies in a Discrete Auction Game.
+
+    Inputs:
+      - V            : (K,) array of value grid points (v_k).
+      - O            : (L,) array of signal grid points (o_l).
+      - B            : List of actions (length M), where each b_m is a demand schedule.
+      - pV           : (K,) array of prior probabilities p(v_k).
+      - gO_given_V   : (K x L) array of conditional probabilities g(o_l | v_k).
+      - n            : Number of bidders.
+      - num_mc       : Number of Monte Carlo samples for approximating payoffs.
+      - max_iter     : Maximum number of iterations.
+      - tol          : Convergence tolerance for strategies.
+
+    Outputs:
+      - sigma        : (L x M) array of equilibrium probabilities sigma(l, m).
+    """
+    K = len(V)
+    L = len(O)
+    M = len(B)
+    B_tuple = tuple(B)
+    V_tuple = tuple(V) 
+    
+    # Precompute marginal probabilities p(o_ℓ)
+    rho = gO_given_V.T @ pV  # shape (L,)
+    
+    # Initialize dual variables Y and strategy matrix σ
+    Y = np.zeros((L, M))  # Dual variables
+    sigma = np.zeros((L, M))  # Strategies
+
+    # Main SODA loop
+    for t in range(max_iter):
+        # Mirror projection: Update σ from Y
+        # Vectorized update for all rows of σ
+        row_max = Y.max(axis=1, keepdims=True)
+        W = np.exp(Y - row_max)  # Subtract max from each row
+        sigma = rho[:, None] * (W / W.sum(axis=1, keepdims=True))
+        # Save σ for convergence check
+        sigma_prev = sigma.copy()
+        
+        # Compute expected utilities
+        U = compute_expected_utilities(
+            sigma,
+            pV,
+            gO_given_V,
+            B_tuple,
+            V_tuple,
+            number_of_simulations,
+            number_of_bidders,
+            capacity_offered
+        )
+        
+        # Update dual variables
+        eta = 1 / np.sqrt(t + 1)  # Step size
+        Y += eta * U
+        if np.max(np.abs(sigma - sigma_prev)) < tol:
+            print(f"Converged after {t} iterations.")
+            break
+    
+    return sigma
+
+
+def compute_expected_utilities(
+    sigma: np.ndarray,
+    pV: np.ndarray,
+    gO_given_V: np.ndarray,
+    B_tuple: Tuple[list[tuple[float, float]], ...],
+    V_tuple: Tuple[float, ...],
+    num_mc: int,
+    num_participants: int,
+    capacity_offered: float
 ) -> np.ndarray:
-    initial_alpha = {str(i) : 0 for i in range(number_of_generators)}
-    initial_beta = {str(i) : 1 for i in range(number_of_generators)}
-    initial_generator_capacity = [generator_capacity/5 for _ in range(len(forecast_one_ic_one_day[ct.ColumnNames.DELIVERY_PERIOD.value]))]
-    initial_capacity_bids = {str(i) : initial_generator_capacity for i in range(number_of_generators)}
-    initial_capacity_bids[ct.ColumnNames.DELIVERY_PERIOD.value] = forecast_one_ic_one_day[ct.ColumnNames.DELIVERY_PERIOD.value]
-    initial_capacity_bids = pl.DataFrame(initial_capacity_bids)
-    converged = False
-    alpha_by_generator = initial_alpha.copy()
-    beta_by_generator = initial_beta.copy()
-    bid_capacity_by_generator = initial_capacity_bids.clone()
-    utility_by_generator = {str(i) : ct.NumericalConstants.DEFAULT_UTILITY.value for i in range(number_of_generators)}
-    
-    while not converged:
-        for i in range(number_of_generators):
-            utility = simulation_engine.run_simulations(
-                date,
-                number_of_simulations,
-                number_of_generators,
-                forecast_one_ic_one_day,
-                alpha_by_generator,
-                beta_by_generator,
-                bid_capacity_by_generator,
-                generator_marginal_cost,
-                generator_capacity,
-                str(i),
-                risk_aversion
-            )
-        
-            new_alpha, new_beta = optimise_strategy(
-                date,
-                number_of_simulations,
-                number_of_generators,
-                alpha_by_generator,
-                beta_by_generator,
-                bid_capacity_by_generator,
-                forecast_one_ic_one_day,
-                generator_marginal_cost,
-                generator_capacity,
-                str(i),
-                risk_aversion,
-                initial_random_evaluations,
-                number_of_optimisation_iterations
-            )
-            
-            candidate_alpha_by_generator = alpha_by_generator.copy()
-            candidate_beta_by_generator = beta_by_generator.copy()
-            candidate_alpha_by_generator[str(i)] = new_alpha
-            candidate_beta_by_generator[str(i)] = new_beta
-            
-            new_utility = simulation_engine.run_simulations(
-                date,
-                number_of_simulations,
-                number_of_generators,
-                forecast_one_ic_one_day,
-                candidate_alpha_by_generator,
-                candidate_beta_by_generator,
-                bid_capacity_by_generator,
-                generator_marginal_cost,
-                generator_capacity,
-                str(i),
-                risk_aversion
-            )
-            
-            if new_utility > utility:
-                alpha_by_generator[str(i)] = new_alpha
-                beta_by_generator[str(i)] = new_beta
-            
-        new_utility_by_generator = simulation_engine.get_utility_by_generator(
-            date,
-            number_of_simulations,
-            number_of_generators,
-            forecast_one_ic_one_day,
-            alpha_by_generator,
-            beta_by_generator,
-            bid_capacity_by_generator,
-            generator_marginal_cost,
-            generator_capacity,
-            risk_aversion
-        )
-        
-        utility_changes_by_generator = [new_utility_by_generator[str(i)] - utility_by_generator[str(i)] for i in range(number_of_generators)]
-            
-        if all(abs(change) < optimisation_tolerance for change in utility_changes_by_generator):
-             converged = True
-        else:
-            utility_by_generator = new_utility_by_generator.copy()
-    
-    return alpha_by_generator, beta_by_generator
+    """
+    Compute the LxM matrix U of expected payoffs.
 
-#For now, only optimising the values alpha and beta, assuming a fixed capacity bid into the auction. May relax this later
-def objective_function(
-    alpha: float,
-    beta: float,
-    date: str,
-    number_of_simulations: int,
-    number_of_generators: int,
-    forecast_one_ic: pl.DataFrame,
-    generator_marginal_cost: float,
-    generator_capacity: float,
-    generator_id: str,
-    risk_aversion: float,
-    alpha_by_generator: dict[int, float],
-    beta_by_generator: dict[int, float],
-    bid_capacity_by_generator : pl.DataFrame
-) -> float:
-    candidate_alpha_by_generator = alpha_by_generator.copy()
-    candidate_beta_by_generator = beta_by_generator.copy()
-    candidate_alpha_by_generator[generator_id] = alpha
-    candidate_beta_by_generator[generator_id] = beta
+    Inputs:
+      - sigma         : (L x M) array of current strategy probabilities,
+                        where sigma[l,m] = Pr[b_i = b_m | o_i = o_l].
+      - pV            : (K,)   array of prior probabilities p(v_k).
+      - gO_given_V    : (K x L) array of conditional probs g(o_l | v_k).
+      - B_tuple       : tuple of length M, each entry is a demand-schedule object b_m.
+      - V_tuple       : tuple of length K, the discrete values v_k.
+      - num_mc        : number of Monte Carlo draws per (k,l,m) to approximate the
+                        expectation over other bidders' signals and actions.
     
-    utility = simulation_engine.run_simulations(
-        date,
-        number_of_simulations,
-        number_of_generators,
-        forecast_one_ic,
-        candidate_alpha_by_generator,
-        candidate_beta_by_generator,
-        bid_capacity_by_generator,
-        generator_marginal_cost,
-        generator_capacity,
-        generator_id,
-        risk_aversion
-    )
+    Returns:
+      - U             : (L x M) array where
+                        U[l,m] ≈ E[u_i | o_i=o_l, b_i=b_m].
+    """
+
+    L, M = sigma.shape
+    K = len(pV)
+    U = np.zeros((L, M))
     
-    return utility  #BayesianOptimization maxmises the objective
-        
-def optimise_strategy(
-    date: str,
-    number_of_simulations: int,
-    number_of_generators: int,
-    alpha_by_generator: dict[str, float],
-    beta_by_generator: dict[str, float],
-    bid_capacity_by_generator: pl.DataFrame,
-    forecast_one_ic: pl.DataFrame,
-    generator_marginal_cost: float,
-    generator_capacity: float,
-    generator_id: str,
-    risk_aversion: float,
-    initial_random_evaluations: int,
-    number_of_optimisation_iterations: int
-) -> tuple[float, float]:
+    for l in range(L):
+        marginal_p_ol = sum(pV[k] * gO_given_V[k, l] for k in range(K))
+        for m in range(M):
+            exp_utility = 0
+            for k in range(K):
+                weight_vk_given_ol = (pV[k] * gO_given_V[k, l])/ marginal_p_ol
+                mc_payoff = 0
+                
+                for _ in range(num_mc):
+                    other_signal_indices = [
+                        sample_index(gO_given_V[k]) for _ in range(num_participants-1)
+                    ]
+                    other_action_indices = [
+                        sample_index(sigma[l_j]) for l_j in other_signal_indices
+                    ]
+                    
+                    payoff = auction.cached_payoff(
+                        k,
+                        m,
+                        tuple(other_action_indices),
+                        V_tuple,
+                        B_tuple,
+                        capacity_offered
+                    )
+                    mc_payoff += payoff
+                mc_payoff /= num_mc
+                exp_utility += weight_vk_given_ol * mc_payoff
+            U[l, m] = exp_utility
     
-    pbounds = {
-        'alpha': (-5, 5),
-        'beta': (0, 2)
-    }
-    
-    def bo_objective(alpha, beta):
-        return objective_function(
-            alpha,
-            beta,
-            date,
-            number_of_simulations,
-            number_of_generators,
-            forecast_one_ic,
-            generator_marginal_cost,
-            generator_capacity,
-            generator_id,
-            risk_aversion,
-            alpha_by_generator,
-            beta_by_generator,
-            bid_capacity_by_generator
-        )
-        
-    optimizer = BayesianOptimization(
-        f=bo_objective,
-        pbounds=pbounds,
-        random_state=42,
-        verbose=1
-    )
-    
-    optimizer.maximize(
-        init_points=initial_random_evaluations,
-        n_iter=number_of_optimisation_iterations
-    )
-    
-    best_params = optimizer.max['params']
-    best_alpha = best_params['alpha']
-    best_beta = best_params['beta']
-    
-    return best_alpha, best_beta
-        
+    return U
+
+def sample_index(
+    probabilities: np.ndarray
+) -> int:
+    return np.random.choice(len(probabilities), p=probabilities)
