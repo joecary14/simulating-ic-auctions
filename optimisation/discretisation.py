@@ -37,6 +37,8 @@ def discretise_distribution(
     
     pdf = np.array(pdf)
     matrix = np.column_stack((bins, pdf))
+    if np.sum(pdf) != 1:
+        banana = 1
     
     return matrix
 
@@ -86,7 +88,7 @@ def discretise_private_information_conditional_distribution_with_floor(
 
 def generate_demand_schedules(
     max_bid_price: float,
-    max_bid_quantity: float,
+    max_total_quantity_demanded: float,
     number_of_possible_prices: int,
     number_of_possible_quantities: int
 ) -> List[List[Tuple[float, float]]]:
@@ -98,7 +100,7 @@ def generate_demand_schedules(
         [(p1, q1), (p2, q2), ..., (pM, qM)], where p1 >= p2 >= ... >= pM and q1 < q2 < ... < qM.
     """
     #TODO - consider elimination of strictly dominated strategies
-    possible_quantities = np.linspace(max_bid_quantity/number_of_possible_quantities, max_bid_quantity, number_of_possible_quantities)
+    possible_quantities = np.linspace(max_total_quantity_demanded/number_of_possible_quantities, max_total_quantity_demanded, number_of_possible_quantities)
     possible_prices = np.linspace(0, max_bid_price, number_of_possible_prices)
     prices_desc = sorted(possible_prices, reverse=True) 
     quantities_asc = sorted(possible_quantities)

@@ -1,7 +1,8 @@
 import numpy as np
 from typing import Tuple
 import optimisation.auction as auction
-
+#TODO - may want to transpose sigma for consistency, so that sigma[m, l] = Pr[b_i = b_m | o_i = o_l] for consistency with other probability matrix definitions
+#TODO - check why sigma is currently set up so that the 
 def soda_algorithm(
     V: np.ndarray, 
     O: np.ndarray, 
@@ -22,7 +23,7 @@ def soda_algorithm(
       - O            : (L,) array of signal grid points (o_l).
       - B            : List of actions (length M), where each b_m is a demand schedule.
       - pV           : (K,) array of prior probabilities p(v_k).
-      - gO_given_V   : (K x L) array of conditional probabilities g(o_l | v_k).
+      - gO_given_V   : (L x K) array of conditional probabilities g(o_l | v_k).
       - n            : Number of bidders.
       - num_mc       : Number of Monte Carlo samples for approximating payoffs.
       - max_iter     : Maximum number of iterations.
@@ -38,7 +39,11 @@ def soda_algorithm(
     V_tuple = tuple(V) 
     
     # Precompute marginal probabilities p(o_ℓ)
-    rho = gO_given_V.T @ pV  # shape (L,)
+    marginal_observation_probabilities = gO_given_V @ pV  # shape (L,)
+    posterior_probabilities = np.zeros((K, L))  # shape (K, L)
+    for k in range(K):
+        for l in range(L):
+            posterior_probabilities[k, l] = (gO_given_V[l, k] * pV[k]) / marginal_observation_probabilities[l]
     
     # Initialize dual variables Y and strategy matrix σ
     Y = np.zeros((L, M))  # Dual variables
@@ -50,14 +55,16 @@ def soda_algorithm(
         # Vectorized update for all rows of σ
         row_max = Y.max(axis=1, keepdims=True)
         W = np.exp(Y - row_max)  # Subtract max from each row
-        sigma = rho[:, None] * (W / W.sum(axis=1, keepdims=True))
+        sigma = marginal_observation_probabilities[:, None] * (W / W.sum(axis=1, keepdims=True))
+        conditional_sigma = W / W.sum(axis=1, keepdims=True)
         # Save σ for convergence check
         sigma_prev = sigma.copy()
         
         # Compute expected utilities
         U = compute_expected_utilities(
-            sigma,
-            pV,
+            conditional_sigma,
+            K,
+            posterior_probabilities,
             gO_given_V,
             B_tuple,
             V_tuple,
@@ -75,10 +82,10 @@ def soda_algorithm(
     
     return sigma
 
-
 def compute_expected_utilities(
-    sigma: np.ndarray,
-    pV: np.ndarray,
+    conditional_sigma: np.ndarray,
+    K: int,
+    posterior_probabilities: np.ndarray,
     gO_given_V: np.ndarray,
     B_tuple: Tuple[list[tuple[float, float]], ...],
     V_tuple: Tuple[float, ...],
@@ -91,9 +98,10 @@ def compute_expected_utilities(
 
     Inputs:
       - sigma         : (L x M) array of current strategy probabilities,
-                        where sigma[l,m] = Pr[b_i = b_m | o_i = o_l].
-      - pV            : (K,)   array of prior probabilities p(v_k).
-      - gO_given_V    : (K x L) array of conditional probs g(o_l | v_k).
+                        where sigma[l,m] = Pr[b_i = b_m|o_i = o_l].
+      - K             : Number of discrete values (v_k).
+      - posterior_probabilities : (K x L) array of posterior probabilities p(v_k | o_l). Columns should sum to 1; not necessarily rows
+      - gO_given_V    : (L x K) array of conditional probs g(o_l | v_k). Columns should sum to 1; not necessarily rows
       - B_tuple       : tuple of length M, each entry is a demand-schedule object b_m.
       - V_tuple       : tuple of length K, the discrete values v_k.
       - num_mc        : number of Monte Carlo draws per (k,l,m) to approximate the
@@ -104,24 +112,20 @@ def compute_expected_utilities(
                         U[l,m] ≈ E[u_i | o_i=o_l, b_i=b_m].
     """
 
-    L, M = sigma.shape
-    K = len(pV)
+    L, M = conditional_sigma.shape
     U = np.zeros((L, M))
-    
     for l in range(L):
-        marginal_p_ol = sum(pV[k] * gO_given_V[k, l] for k in range(K))
         for m in range(M):
             exp_utility = 0
             for k in range(K):
-                weight_vk_given_ol = (pV[k] * gO_given_V[k, l])/ marginal_p_ol
+                weight_vk_given_ol = posterior_probabilities[k,l]
                 mc_payoff = 0
-                
                 for _ in range(num_mc):
                     other_signal_indices = [
-                        sample_index(gO_given_V[k]) for _ in range(num_participants-1)
+                        sample_index(gO_given_V[:, k]) for _ in range(num_participants-1)
                     ]
                     other_action_indices = [
-                        sample_index(sigma[l_j]) for l_j in other_signal_indices
+                        sample_index(conditional_sigma[observation_row]) for observation_row in other_signal_indices
                     ]
                     
                     payoff = auction.cached_payoff(

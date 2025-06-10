@@ -66,14 +66,14 @@ def generate_payoff_for_bidder(
 
 @lru_cache(maxsize=50000)
 def cached_payoff(
-    value_index: int, 
+    outturn_value_index: int, 
     bidder_action_index: int, 
     other_action_indices: list[int], 
     possible_values: tuple[int], 
     possible_demand_schedules: tuple[list[tuple[float, float]]],
     capacity_offered: float
 ) -> float:
-    value = possible_values[value_index]
+    value = possible_values[outturn_value_index]
     schedules = {i: possible_demand_schedules[bidder_action_index] for i in range(len(other_action_indices) + 1)}
     for j, other_index in enumerate(other_action_indices):
         schedules[j + 1] = possible_demand_schedules[other_index]
