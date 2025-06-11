@@ -91,7 +91,7 @@ def generate_demand_schedules(
     max_total_quantity_demanded: float,
     number_of_possible_prices: int,
     number_of_possible_quantities: int
-) -> List[List[Tuple[float, float]]]:
+) -> Tuple[Tuple[Tuple[float, float], ...]]:
     """
     Generate all demand schedules where prices are non-increasing and quantities are strictly increasing.
     
@@ -108,7 +108,7 @@ def generate_demand_schedules(
 
     def backtrack(i, prev_price_idx, prev_qty_idx, current_schedule: List[Tuple[float, float]]):
         if i == number_of_possible_prices: 
-            schedules.append(current_schedule.copy())
+            schedules.append(tuple(current_schedule))
             return
         
         # Prices must be non-increasing (can be same or lower)
@@ -121,4 +121,4 @@ def generate_demand_schedules(
     
     backtrack(i=0, prev_price_idx=0, prev_qty_idx=-1, current_schedule=[])
     
-    return schedules
+    return tuple(schedules)

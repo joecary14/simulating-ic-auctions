@@ -1,18 +1,19 @@
 import numpy as np
 from typing import Tuple
+import seaborn as sns
+import matplotlib.pyplot as plt
 import optimisation.auction as auction
-#TODO - may want to transpose sigma for consistency, so that sigma[m, l] = Pr[b_i = b_m | o_i = o_l] for consistency with other probability matrix definitions
-#TODO - check why sigma is currently set up so that the 
+
 def soda_algorithm(
     V: np.ndarray, 
     O: np.ndarray, 
-    B: list[list[tuple[float, float]]], 
+    B: Tuple[Tuple[Tuple[float, float], ...]], 
     pV: np.ndarray, 
     gO_given_V: np.ndarray, 
     number_of_bidders: int, 
     number_of_simulations: int,
     capacity_offered: float,
-    max_iter: int = 1000, 
+    max_iter: int = 10000, 
     tol: float=1e-6
 ):
     """
@@ -35,11 +36,11 @@ def soda_algorithm(
     K = len(V)
     L = len(O)
     M = len(B)
-    B_tuple = tuple(B)
     V_tuple = tuple(V) 
     
     # Precompute marginal probabilities p(o_ℓ)
     marginal_observation_probabilities = gO_given_V @ pV  # shape (L,)
+    marginal_observation_probabilities /= np.sum(marginal_observation_probabilities)
     posterior_probabilities = np.zeros((K, L))  # shape (K, L)
     for k in range(K):
         for l in range(L):
@@ -47,26 +48,18 @@ def soda_algorithm(
     
     # Initialize dual variables Y and strategy matrix σ
     Y = np.zeros((L, M))  # Dual variables
-    sigma = np.zeros((L, M))  # Strategies
+    current_conditional_sigma = update_conditional_sigma(Y)
+    current_sigma = marginal_observation_probabilities[:, None] * current_conditional_sigma
 
     # Main SODA loop
     for t in range(max_iter):
-        # Mirror projection: Update σ from Y
-        # Vectorized update for all rows of σ
-        row_max = Y.max(axis=1, keepdims=True)
-        W = np.exp(Y - row_max)  # Subtract max from each row
-        sigma = marginal_observation_probabilities[:, None] * (W / W.sum(axis=1, keepdims=True))
-        conditional_sigma = W / W.sum(axis=1, keepdims=True)
-        # Save σ for convergence check
-        sigma_prev = sigma.copy()
-        
-        # Compute expected utilities
+        print(f"Iteration {t+1} of {max_iter}")
         U = compute_expected_utilities(
-            conditional_sigma,
+            current_conditional_sigma,
             K,
             posterior_probabilities,
             gO_given_V,
-            B_tuple,
+            B,
             V_tuple,
             number_of_simulations,
             number_of_bidders,
@@ -76,18 +69,29 @@ def soda_algorithm(
         # Update dual variables
         eta = 1 / np.sqrt(t + 1)  # Step size
         Y += eta * U
-        if np.max(np.abs(sigma - sigma_prev)) < tol:
+        
+        new_conditional_sigma = update_conditional_sigma(Y)
+        new_sigma = marginal_observation_probabilities[:, None] * new_conditional_sigma
+        
+        sigma_distance = np.max(np.abs(new_sigma - current_sigma))
+        print(f"Max distance between current and new sigma: {sigma_distance:.6f}")
+
+        if sigma_distance < tol:
             print(f"Converged after {t} iterations.")
-            break
-    
-    return sigma
+            return new_sigma
+        
+        current_sigma = new_sigma.copy()
+        current_conditional_sigma = new_conditional_sigma.copy()
+
+    print("Reached maximum iterations without convergence.")
+    return current_sigma
 
 def compute_expected_utilities(
     conditional_sigma: np.ndarray,
     K: int,
     posterior_probabilities: np.ndarray,
     gO_given_V: np.ndarray,
-    B_tuple: Tuple[list[tuple[float, float]], ...],
+    B: Tuple[Tuple[Tuple[float, float], ...]],
     V_tuple: Tuple[float, ...],
     num_mc: int,
     num_participants: int,
@@ -133,7 +137,7 @@ def compute_expected_utilities(
                         m,
                         tuple(other_action_indices),
                         V_tuple,
-                        B_tuple,
+                        B,
                         capacity_offered
                     )
                     mc_payoff += payoff
@@ -142,6 +146,15 @@ def compute_expected_utilities(
             U[l, m] = exp_utility
     
     return U
+
+def update_conditional_sigma(
+    Y: np.ndarray
+) -> np.ndarray:
+    row_max = Y.max(axis=1, keepdims=True)
+    W = np.exp(Y - row_max)  # Subtract max from each row
+    conditional_sigma = W / W.sum(axis=1, keepdims=True)
+    
+    return conditional_sigma
 
 def sample_index(
     probabilities: np.ndarray

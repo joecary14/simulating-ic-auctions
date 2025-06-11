@@ -25,18 +25,18 @@ min_observation = -10
 max_observation = 30
 max_bid_price = 30
 max_total_quantity_demanded = 100
-number_of_price_levels = 5
-number_of_quantity_levels = 5
+number_of_price_levels = 3
+number_of_quantity_levels = 3
 capacity_offered = 100
 number_of_bidders = 3
-number_of_simulations = 10
+number_of_simulations = 100
 
 async def main():
     prior_price_spread_distribution = stats.norm(
         loc=central_price_spread_estimate, 
         scale=price_spread_stdev
     )
-    engine.run_optimisation_one_period(
+    engine.run_optimisation_one_period( 
         prior_price_spread_distribution,
         min_prior_spread,
         max_prior_spread,

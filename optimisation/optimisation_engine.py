@@ -3,8 +3,8 @@ from scipy.stats import norm
 
 import optimisation.discretisation as discretisation
 import optimisation.optimiser as optimiser
+import optimisation.visualisation as visualisation
 
-#TODO - this is where we bring it all together
 def run_optimisation_one_period(
     price_spread_prior_distribution,
     min_prior_spread: float,
@@ -57,7 +57,7 @@ def run_optimisation_one_period(
         number_of_quantity_levels
     )
         
-    optimiser.soda_algorithm(
+    sigma = optimiser.soda_algorithm(
         possible_prior_values,
         possible_observations,
         discrete_action_space,
@@ -67,3 +67,5 @@ def run_optimisation_one_period(
         number_of_simulations,
         capacity_offered
     )
+    
+    visualisation.visualise_as_heatmap(sigma)

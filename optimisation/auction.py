@@ -1,7 +1,7 @@
 from collections import defaultdict
 from functools import lru_cache
 import optimisation.bid as bid
-
+#TODO - check the precise clearing rule
 def clear_auction(
     bid_schedules_by_participant_id: dict[int, list[tuple[float, float]]],
     capacity_offered: float
@@ -13,24 +13,36 @@ def clear_auction(
     
     quantity_acccepted = 0
     clearing_price = 0
-    allocations_by_participant = {}
-    for price, bids_at_price in bids_by_price.items():
+    allocations_by_participant = {i : 0.0 for i in bid_schedules_by_participant_id.keys()}
+    capacity_fully_allocated = False
+    
+    for price in sorted(bids_by_price.keys(), reverse=True):
+        bids_at_price = bids_by_price[price]
         total_quantity = sum(b.quantity for b in bids_at_price)
-        if total_quantity + quantity_acccepted < capacity_offered:
+        if total_quantity + quantity_acccepted <= capacity_offered:
             for bid in bids_at_price:
-                allocations_by_participant[bid.participant_id] += bid.quantity
+                allocations_by_participant[bid.bidder_id] += bid.quantity
                 quantity_acccepted += bid.quantity
+            
+            if quantity_acccepted == capacity_offered:
+                clearing_price = price
+                capacity_fully_allocated = True
+                break
         else:
             multiplier = (capacity_offered - quantity_acccepted) / total_quantity
             for bid in bids_at_price:
                 allocated_quantity = bid.quantity * multiplier
-                allocations_by_participant[bid.participant_id] += allocated_quantity
+                allocations_by_participant[bid.bidder_id] += allocated_quantity
                 quantity_acccepted += allocated_quantity
-                clearing_price = price
+            
+            clearing_price = price
+            capacity_fully_allocated = True
             break
     
-    if quantity_acccepted < capacity_offered:
-        raise ValueError("Not enough bids to meet the capacity offered.")
+    if not capacity_fully_allocated:
+        clearing_price = 0
+        for i in allocations_by_participant.keys():
+            allocations_by_participant[i] = 0.0
     
     return clearing_price, allocations_by_participant
         
@@ -68,18 +80,18 @@ def generate_payoff_for_bidder(
 def cached_payoff(
     outturn_value_index: int, 
     bidder_action_index: int, 
-    other_action_indices: list[int], 
-    possible_values: tuple[int], 
+    other_action_indices: tuple[int], 
+    possible_values: tuple[float], 
     possible_demand_schedules: tuple[list[tuple[float, float]]],
     capacity_offered: float
 ) -> float:
-    value = possible_values[outturn_value_index]
-    schedules = {i: possible_demand_schedules[bidder_action_index] for i in range(len(other_action_indices) + 1)}
+    outturn_value = possible_values[outturn_value_index]
+    schedules = {i: possible_demand_schedules[bidder_action_index] for i in range(len(other_action_indices) + 1)} #Just initialising the dictionary
     for j, other_index in enumerate(other_action_indices):
         schedules[j + 1] = possible_demand_schedules[other_index]
     
     payoff = generate_payoff_for_bidder(
-        value,
+        outturn_value,
         schedules,
         0,
         capacity_offered
