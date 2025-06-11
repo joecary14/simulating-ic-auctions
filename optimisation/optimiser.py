@@ -118,18 +118,26 @@ def compute_expected_utilities(
 
     L, M = conditional_sigma.shape
     U = np.zeros((L, M))
+    signal_probabilties_by_vk = [gO_given_V[:, k] for k in range(K)]
     for l in range(L):
         for m in range(M):
             exp_utility = 0
             for k in range(K):
                 weight_vk_given_ol = posterior_probabilities[k,l]
                 mc_payoff = 0
+                signal_probabilities = signal_probabilties_by_vk[k]
+                # Sample other participants' signals and actions
                 for _ in range(num_mc):
-                    other_signal_indices = [
-                        sample_index(gO_given_V[:, k]) for _ in range(num_participants-1)
-                    ]
+                    other_signal_indices = np.random.choice(
+                        L,
+                        size=num_participants-1,
+                        p=signal_probabilities
+                    )
                     other_action_indices = [
-                        sample_index(conditional_sigma[observation_row]) for observation_row in other_signal_indices
+                        np.random.choice(
+                            M,
+                            p=conditional_sigma[observation_row]
+                        ) for observation_row in other_signal_indices
                     ]
                     
                     payoff = auction.cached_payoff(
@@ -155,8 +163,3 @@ def update_conditional_sigma(
     conditional_sigma = W / W.sum(axis=1, keepdims=True)
     
     return conditional_sigma
-
-def sample_index(
-    probabilities: np.ndarray
-) -> int:
-    return np.random.choice(len(probabilities), p=probabilities)
