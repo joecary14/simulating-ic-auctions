@@ -1,65 +1,49 @@
 import numpy as np
-from typing import Tuple
-import seaborn as sns
-import matplotlib.pyplot as plt
+from typing import Optional, Tuple
 import optimisation.auction as auction
+import optimisation.visualisation as visualisation
 
 def soda_algorithm(
-    V: np.ndarray, 
-    O: np.ndarray, 
-    B: Tuple[Tuple[Tuple[float, float], ...]], 
-    pV: np.ndarray, 
-    gO_given_V: np.ndarray, 
+    possible_values: np.ndarray, 
+    possible_observations: np.ndarray, 
+    possible_demand_schedules: Tuple[Tuple[Tuple[float, float], ...]], 
+    marginal_observation_probabilities: np.ndarray, 
+    conditional_observation_probabilities: np.ndarray,
+    posterior_probabilities: np.ndarray,
     number_of_bidders: int, 
     number_of_simulations: int,
     capacity_offered: float,
-    max_iter: int = 10000, 
-    tol: float=1e-6
+    input_conditional_sigma: 'Optional[np.ndarray]',
+    input_dual_variables: 'Optional[np.ndarray]',
+    start_iteration_number: int = 0,
+    max_iter: int = 1000000, 
+    tol: float=1e-3
 ):
-    """
-    SODA Algorithm for Computing Distributional Strategies in a Discrete Auction Game.
-
-    Inputs:
-      - V            : (K,) array of value grid points (v_k).
-      - O            : (L,) array of signal grid points (o_l).
-      - B            : List of actions (length M), where each b_m is a demand schedule.
-      - pV           : (K,) array of prior probabilities p(v_k).
-      - gO_given_V   : (L x K) array of conditional probabilities g(o_l | v_k).
-      - n            : Number of bidders.
-      - num_mc       : Number of Monte Carlo samples for approximating payoffs.
-      - max_iter     : Maximum number of iterations.
-      - tol          : Convergence tolerance for strategies.
-
-    Outputs:
-      - sigma        : (L x M) array of equilibrium probabilities sigma(l, m).
-    """
-    K = len(V)
-    L = len(O)
-    M = len(B)
-    V_tuple = tuple(V) 
-    
-    # Precompute marginal probabilities p(o_ℓ)
-    marginal_observation_probabilities = gO_given_V @ pV  # shape (L,)
-    marginal_observation_probabilities /= np.sum(marginal_observation_probabilities)
-    posterior_probabilities = np.zeros((K, L))  # shape (K, L)
-    for k in range(K):
-        for l in range(L):
-            posterior_probabilities[k, l] = (gO_given_V[l, k] * pV[k]) / marginal_observation_probabilities[l]
+    K = len(possible_values)
+    L = len(possible_observations)
+    M = len(possible_demand_schedules)
+    V_tuple = tuple(possible_values) 
     
     # Initialize dual variables Y and strategy matrix σ
-    Y = np.zeros((L, M))  # Dual variables
-    current_conditional_sigma = update_conditional_sigma(Y)
-    current_sigma = marginal_observation_probabilities[:, None] * current_conditional_sigma
-
+    if input_conditional_sigma is None or input_dual_variables is None:
+        Y = np.zeros((L, M))  # Dual variables
+        current_conditional_sigma = update_conditional_sigma(Y)
+        current_sigma = marginal_observation_probabilities[:, None] * current_conditional_sigma
+    else:
+        Y = input_dual_variables
+        current_conditional_sigma = input_conditional_sigma
+        current_sigma = marginal_observation_probabilities[:, None] * current_conditional_sigma
+    convergence_history = []
+    last_iteration = 0
     # Main SODA loop
-    for t in range(max_iter):
-        print(f"Iteration {t+1} of {max_iter}")
+    for t in range(start_iteration_number, max_iter + start_iteration_number):
+        print(f"Iteration {t+1 - start_iteration_number} of {max_iter}")
         U = compute_expected_utilities(
             current_conditional_sigma,
             K,
             posterior_probabilities,
-            gO_given_V,
-            B,
+            conditional_observation_probabilities,
+            possible_demand_schedules,
             V_tuple,
             number_of_simulations,
             number_of_bidders,
@@ -74,23 +58,30 @@ def soda_algorithm(
         new_sigma = marginal_observation_probabilities[:, None] * new_conditional_sigma
         
         sigma_distance = np.max(np.abs(new_sigma - current_sigma))
+        mean_distance = np.mean(np.abs(new_sigma - current_sigma))
+        convergence_history.append((sigma_distance, mean_distance))
         print(f"Max distance between current and new sigma: {sigma_distance:.6f}")
+        three_point_average_sigma_distance = np.mean([h[0] for h in convergence_history[-3:]]) if len(convergence_history) >= 3 else 1
 
-        if sigma_distance < tol:
-            print(f"Converged after {t} iterations.")
-            return new_sigma
+        if three_point_average_sigma_distance < tol:
+            print(f"Converged after {t+1} iterations.")
+            visualisation.plot_convergence(convergence_history)
+            last_iteration = t + 1
+            return new_conditional_sigma, Y, last_iteration
         
-        current_sigma = new_sigma.copy()
         current_conditional_sigma = new_conditional_sigma.copy()
+        current_sigma = new_sigma.copy()
 
     print("Reached maximum iterations without convergence.")
-    return current_sigma
+    visualisation.plot_convergence(convergence_history)
+    last_iteration = max_iter
+    return current_conditional_sigma, Y, last_iteration
 
 def compute_expected_utilities(
     conditional_sigma: np.ndarray,
     K: int,
     posterior_probabilities: np.ndarray,
-    gO_given_V: np.ndarray,
+    conditional_observation_probabilities: np.ndarray,
     B: Tuple[Tuple[Tuple[float, float], ...]],
     V_tuple: Tuple[float, ...],
     num_mc: int,
@@ -101,8 +92,8 @@ def compute_expected_utilities(
     Compute the LxM matrix U of expected payoffs.
 
     Inputs:
-      - sigma         : (L x M) array of current strategy probabilities,
-                        where sigma[l,m] = Pr[b_i = b_m|o_i = o_l].
+      - conditional_sigma         : (L x M) array of current strategy probabilities,
+                        where conditional_sigma[l,m] = Pr[b_i = b_m|o_i = o_l].
       - K             : Number of discrete values (v_k).
       - posterior_probabilities : (K x L) array of posterior probabilities p(v_k | o_l). Columns should sum to 1; not necessarily rows
       - gO_given_V    : (L x K) array of conditional probs g(o_l | v_k). Columns should sum to 1; not necessarily rows
@@ -118,28 +109,33 @@ def compute_expected_utilities(
 
     L, M = conditional_sigma.shape
     U = np.zeros((L, M))
-    signal_probabilties_by_vk = [gO_given_V[:, k] for k in range(K)]
+    signal_probabilties_by_vk = [conditional_observation_probabilities[:, k] for k in range(K)]
+    conditional_strategy_cumulative_probabilities = np.cumsum(conditional_sigma, axis=1)
     for l in range(L):
         for m in range(M):
             exp_utility = 0
             for k in range(K):
                 weight_vk_given_ol = posterior_probabilities[k,l]
-                mc_payoff = 0
+                if weight_vk_given_ol == 0:
+                    continue
+                mc_payoffs = np.zeros(num_mc)
                 signal_probabilities = signal_probabilties_by_vk[k]
                 # Sample other participants' signals and actions
-                for _ in range(num_mc):
-                    other_signal_indices = np.random.choice(
-                        L,
-                        size=num_participants-1,
-                        p=signal_probabilities
-                    )
+                all_other_signals = np.random.choice(
+                    L,
+                    size = (num_mc, num_participants-1),
+                    p=signal_probabilities
+                )
+                for simulation_index in range(num_mc):
+                    other_signal_indices = all_other_signals[simulation_index]
+                    action_randoms = np.random.random(len(other_signal_indices))
                     other_action_indices = [
-                        np.random.choice(
-                            M,
-                            p=conditional_sigma[observation_row]
-                        ) for observation_row in other_signal_indices
+                        np.searchsorted(
+                            conditional_strategy_cumulative_probabilities[observation_row],
+                            rand
+                        )
+                        for observation_row, rand in zip(other_signal_indices, action_randoms)
                     ]
-                    
                     payoff = auction.cached_payoff(
                         k,
                         m,
@@ -148,9 +144,9 @@ def compute_expected_utilities(
                         B,
                         capacity_offered
                     )
-                    mc_payoff += payoff
-                mc_payoff /= num_mc
-                exp_utility += weight_vk_given_ol * mc_payoff
+                    mc_payoffs[simulation_index] = payoff
+                
+                exp_utility += np.mean(mc_payoffs) * weight_vk_given_ol
             U[l, m] = exp_utility
     
     return U
@@ -163,3 +159,4 @@ def update_conditional_sigma(
     conditional_sigma = W / W.sum(axis=1, keepdims=True)
     
     return conditional_sigma
+

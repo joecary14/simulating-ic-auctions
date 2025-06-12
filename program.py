@@ -20,15 +20,15 @@ central_price_spread_estimate = 10
 price_spread_stdev = 5
 min_prior_spread = -5
 max_prior_spread = 25 #+/- 3 sigma for now
-number_of_bins = 5
+number_of_bins = 6
 min_observation = -10
 max_observation = 30
 max_bid_price = 30
 max_total_quantity_demanded = 100
-number_of_price_levels = 3
-number_of_quantity_levels = 3
+number_of_price_levels = 15
+number_of_quantity_levels = 1
 capacity_offered = 100
-number_of_bidders = 3
+number_of_bidders = 10
 number_of_simulations = 100
 
 async def main():

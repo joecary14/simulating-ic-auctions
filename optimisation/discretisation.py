@@ -106,19 +106,19 @@ def generate_demand_schedules(
     quantities_asc = sorted(possible_quantities)
     schedules = []
 
-    def backtrack(i, prev_price_idx, prev_qty_idx, current_schedule: List[Tuple[float, float]]):
-        if i == number_of_possible_prices: 
+    def backtrack(step, prev_price_idx, current_schedule: List[Tuple[float, float]]):
+        if step == number_of_possible_quantities: 
             schedules.append(tuple(current_schedule))
             return
         
+        current_quantity = quantities_asc[step]
         # Prices must be non-increasing (can be same or lower)
         for price_idx in range(prev_price_idx, len(prices_desc)):
-            # Quantities must be strictly increasing
-            for qty_idx in range(prev_qty_idx + 1, len(quantities_asc)):
-                current_schedule.append((prices_desc[price_idx], quantities_asc[qty_idx]))
-                backtrack(i + 1, price_idx, qty_idx, current_schedule)
-                current_schedule.pop()
+            current_price = prices_desc[price_idx]
+            current_schedule.append((current_price, current_quantity))
+            backtrack(step + 1, price_idx, current_schedule)
+            current_schedule.pop()
     
-    backtrack(i=0, prev_price_idx=0, prev_qty_idx=-1, current_schedule=[])
-    
+    backtrack(0, 0, [])
+    print(f"Generated {len(schedules)} demand schedules.")
     return tuple(schedules)

@@ -3,7 +3,7 @@ from functools import lru_cache
 import optimisation.bid as bid
 #TODO - check the precise clearing rule
 def clear_auction(
-    bid_schedules_by_participant_id: dict[int, list[tuple[float, float]]],
+    bid_schedules_by_participant_id: list[tuple[tuple[float, float], ...]],
     capacity_offered: float
 ) -> tuple[float, list[float]]:
     sorted_bids = extract_bids_from_demand_schedules(bid_schedules_by_participant_id)
@@ -16,23 +16,27 @@ def clear_auction(
     i = 0
     while i < len(sorted_bids) and quantity_acccepted < capacity_offered:
         current_price = sorted_bids[i].price
-        bids_at_price = []
+        
+        start_index = i
+        total_quantity_at_price = 0.0
+        
         while i < len(sorted_bids) and sorted_bids[i].price == current_price:
-            bids_at_price.append(sorted_bids[i])
+            total_quantity_at_price += sorted_bids[i].quantity
             i += 1
         
-        total_quantity_at_price = sum(b.quantity for b in bids_at_price)
         remaining_capacity = capacity_offered - quantity_acccepted
         
-        if total_quantity_at_price + quantity_acccepted <= capacity_offered:
-            for bid in bids_at_price:
+        if total_quantity_at_price <= remaining_capacity:
+            for bid_index in range(start_index, i):
+                bid = sorted_bids[bid_index]
                 allocations[bid.bidder_id] += bid.quantity
                 quantity_acccepted += bid.quantity
             clearing_price = current_price
             
         else:
             multiplier = remaining_capacity / total_quantity_at_price
-            for bid in bids_at_price:
+            for bid_index in range(start_index, i):
+                bid = sorted_bids[bid_index]
                 allocated_quantity = bid.quantity * multiplier
                 allocations[bid.bidder_id] += allocated_quantity
                 quantity_acccepted += allocated_quantity
@@ -42,18 +46,15 @@ def clear_auction(
     return clearing_price, allocations
 
 def extract_bids_from_demand_schedules(
-    demand_schedules_by_participant_id: dict[int, list[tuple[float, float]]]
+    demand_schedules_submitted: list[tuple[tuple[float, float], ...]]
 ) -> list[bid.Bid]:
     bids = []
-    for participant_id, demand_schedule in demand_schedules_by_participant_id.items():
-        for i in range(len(demand_schedule)):
-            price, quantity = demand_schedule[i]
-            if i == 0:
-                bids.append(bid.Bid(participant_id, price, quantity))
-            else:
-                previous_quantity = demand_schedule[i - 1][1]
-                marginal_quantity = quantity - previous_quantity
-                bids.append(bid.Bid(participant_id, price, marginal_quantity))
+    for participant_id, demand_schedule in enumerate(demand_schedules_submitted):
+        previous_quantity = 0.0
+        for price, quantity in demand_schedule:
+            marginal_quantity = quantity - previous_quantity
+            bids.append(bid.Bid(participant_id, price, marginal_quantity))
+            previous_quantity = quantity
     
     bids.sort(key=lambda b: b.price, reverse=True)
     
@@ -61,11 +62,11 @@ def extract_bids_from_demand_schedules(
 
 def generate_payoff_for_bidder(
     realised_capacity_value: float,
-    bid_schedules_by_participant_id: dict[int, list[tuple[float, float]]],
+    demand_schedules_submitted: list[tuple[tuple[float, float], ...]],
     participant_id: int,
     capacity_offered: float
-) -> float: #This accounts for capacity value being bnegative (i.e. FAPD)
-    clearing_price, allocations_by_participant = clear_auction(bid_schedules_by_participant_id, capacity_offered)
+) -> float: #This accounts for capacity value being negative (i.e. FAPD)
+    clearing_price, allocations_by_participant = clear_auction(demand_schedules_submitted, capacity_offered)
     allocated_quantity = allocations_by_participant[participant_id]
     utility = (max(realised_capacity_value, 0) - clearing_price) * allocated_quantity
     
@@ -77,14 +78,13 @@ def cached_payoff(
     bidder_action_index: int, 
     other_action_indices: tuple[int], 
     possible_values: tuple[float], 
-    possible_demand_schedules: tuple[list[tuple[float, float]]],
+    possible_demand_schedules: tuple[tuple[tuple[float, float], ...]],
     capacity_offered: float
 ) -> float:
     outturn_value = possible_values[outturn_value_index]
-    #TODO - this doesn't have to be a dictionary, can just be made into a list
-    schedules = {i: possible_demand_schedules[bidder_action_index] for i in range(len(other_action_indices) + 1)} #Just initialising the dictionary
-    for j, other_index in enumerate(other_action_indices):
-        schedules[j + 1] = possible_demand_schedules[other_index]
+    schedules = [possible_demand_schedules[bidder_action_index]]
+    for other_index in other_action_indices:
+        schedules.append(possible_demand_schedules[other_index])
     
     payoff = generate_payoff_for_bidder(
         outturn_value,
