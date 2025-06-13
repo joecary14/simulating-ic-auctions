@@ -3,6 +3,7 @@ import model.engine as engine
 import price_forecaster.data_collection as data_collection
 import price_forecaster.lear_forecast as lear_forecast
 import optimisation.optimisation_engine as engine
+import simulation.simulation_engine as simulation_engine
 import scipy.stats as stats
 
 demand_filepath = '/Users/josephcary/Library/CloudStorage/OneDrive-Nexus365/First Year/Papers/Interconnection/Forecasting/Input Data/FR D-2 Demand Forecast.xlsx'
@@ -20,23 +21,24 @@ central_price_spread_estimate = 10
 price_spread_stdev = 5
 min_prior_spread = -5
 max_prior_spread = 25 #+/- 3 sigma for now
-number_of_bins = 6
+number_of_bins = 10
 min_observation = -10
 max_observation = 30
 max_bid_price = 30
-max_total_quantity_demanded = 100
-number_of_price_levels = 15
+max_total_quantity_demanded = 50
+number_of_price_levels = 10
 number_of_quantity_levels = 1
 capacity_offered = 100
 number_of_bidders = 10
-number_of_simulations = 100
+number_of_mc_simulations = 100
+number_of_auction_simulations = 1000
 
 async def main():
     prior_price_spread_distribution = stats.norm(
         loc=central_price_spread_estimate, 
         scale=price_spread_stdev
     )
-    engine.run_optimisation_one_period( 
+    simulation_engine.simulate_auction(
         prior_price_spread_distribution,
         min_prior_spread,
         max_prior_spread,
@@ -49,7 +51,8 @@ async def main():
         number_of_quantity_levels,
         capacity_offered,
         number_of_bidders,
-        number_of_simulations
+        number_of_mc_simulations,
+        number_of_auction_simulations
     )
      
 asyncio.run(main())

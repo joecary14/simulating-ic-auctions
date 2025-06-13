@@ -75,6 +75,8 @@ def run_optimisation_one_period(
     
     visualisation.visualise_as_heatmap(conditional_sigma)
     
+    return conditional_sigma, prior_value_probabilities, conditional_observation_probabilities, possible_demand_schedules
+    
 def solve_for_equilibrium(
     possible_prior_values: np.ndarray,
     possible_observations: np.ndarray,

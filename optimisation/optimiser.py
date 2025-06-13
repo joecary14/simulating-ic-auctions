@@ -17,7 +17,7 @@ def soda_algorithm(
     input_dual_variables: 'Optional[np.ndarray]',
     start_iteration_number: int = 0,
     max_iter: int = 1000000, 
-    tol: float=1e-3
+    tol: float=1e-2
 ):
     K = len(possible_values)
     L = len(possible_observations)

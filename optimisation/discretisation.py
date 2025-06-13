@@ -37,8 +37,8 @@ def discretise_distribution(
     
     pdf = np.array(pdf)
     matrix = np.column_stack((bins, pdf))
-    if np.sum(pdf) != 1:
-        banana = 1
+    if not np.isclose(np.sum(pdf), 1.0, atol=1e-8):
+        print(f"Warning: Probabilities sum to {np.sum(pdf)}, which is not 1 within tolerance.")
     
     return matrix
 
