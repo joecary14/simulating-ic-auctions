@@ -17,7 +17,7 @@ def soda_algorithm(
     input_dual_variables: 'Optional[np.ndarray]',
     start_iteration_number: int = 0,
     max_iter: int = 1000000, 
-    tol: float=1e-2
+    tol: float=1e-3
 ):
     K = len(possible_values)
     L = len(possible_observations)
@@ -37,7 +37,7 @@ def soda_algorithm(
     last_iteration = 0
     # Main SODA loop
     for t in range(start_iteration_number, max_iter + start_iteration_number):
-        print(f"Iteration {t+1 - start_iteration_number} of {max_iter}")
+        print(f"Iteration {t+1} of {max_iter}")
         U = compute_expected_utilities(
             current_conditional_sigma,
             K,
@@ -65,7 +65,7 @@ def soda_algorithm(
 
         if three_point_average_sigma_distance < tol:
             print(f"Converged after {t+1} iterations.")
-            visualisation.plot_convergence(convergence_history)
+            # visualisation.plot_convergence(convergence_history)
             last_iteration = t + 1
             return new_conditional_sigma, Y, last_iteration
         
@@ -73,7 +73,7 @@ def soda_algorithm(
         current_sigma = new_sigma.copy()
 
     print("Reached maximum iterations without convergence.")
-    visualisation.plot_convergence(convergence_history)
+    # visualisation.plot_convergence(convergence_history)
     last_iteration = max_iter
     return current_conditional_sigma, Y, last_iteration
 

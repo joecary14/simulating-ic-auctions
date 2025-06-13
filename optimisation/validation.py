@@ -3,7 +3,7 @@ from scipy.optimize import linprog
 from typing import Tuple
 import optimisation.optimiser as optimiser
 
-def check_for_equilibrium(
+def calculate_utility_loss(
     current_conditional_sigma: np.ndarray,
     marginal_observation_probabilities: np.ndarray,
     conditional_observation_probabilities: np.ndarray,
@@ -29,20 +29,15 @@ def check_for_equilibrium(
     )
     
     current_sigma = marginal_observation_probabilities[:, None] * current_conditional_sigma
-    best_value, current_value, gap = equilibrium_utility_loss(
+    best_value, current_value, relative_gap = equilibrium_utility_loss(
         current_utility,
         marginal_observation_probabilities,
         current_sigma,
         tol=tol
     )
     
-    print(f"Best response value: {best_value}, Current value: {current_value}, Gap: {gap}")
-    if gap > tol:
-        print("Warning: The current strategy is not an equilibrium strategy.")
-    else:
-        print("The current strategy is an equilibrium strategy.")
-    
-    return gap
+    print(f"Best response value: {best_value}, Current value: {current_value}, Relative Gap: {relative_gap}")
+    return relative_gap
 
 def equilibrium_utility_loss(
     current_utility: np.ndarray,
@@ -76,5 +71,5 @@ def equilibrium_utility_loss(
     # Current strategy value
     current_value = np.sum(current_sigma * current_utility)
     
-    gap = float(best_value - current_value)
-    return float(best_value), float(current_value), gap
+    relative_gap = np.abs(float(best_value - current_value)/float(best_value))
+    return float(best_value), float(current_value), relative_gap

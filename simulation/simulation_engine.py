@@ -17,6 +17,9 @@ def simulate_auction(
     number_of_bidders: int,
     number_of_mc_simulations: int,
     number_of_auction_simulations: int,
+    soda_tolerance: float,
+    lp_relative_tolerance: float,
+    max_iterations: int
 ) -> float:
     conditional_sigma, prior_value_probabilities, conditional_observation_probabilities, possible_demand_schedules = optimisation_engine.run_optimisation_one_period(
         price_spread_prior_distribution,
@@ -31,20 +34,22 @@ def simulate_auction(
         number_of_quantity_levels,
         capacity_offered,
         number_of_bidders,
-        number_of_mc_simulations
+        number_of_mc_simulations,
+        soda_tolerance,
+        lp_relative_tolerance,
+        max_iterations
     )
     
     simulated_clearing_price = simulate_auction_clearing(
         number_of_auction_simulations,
         conditional_sigma,
-    
         prior_value_probabilities,
         conditional_observation_probabilities,
         possible_demand_schedules,
         number_of_bidders,
         capacity_offered
     )
-    
+    print(f"Clearing Price: {simulated_clearing_price}")
     return simulated_clearing_price
 
 def simulate_auction_clearing(

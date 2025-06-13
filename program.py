@@ -20,18 +20,21 @@ country_code = 'BE'
 central_price_spread_estimate = 10
 price_spread_stdev = 5
 min_prior_spread = -5
-max_prior_spread = 25 #+/- 3 sigma for now
+max_prior_spread = 25 
 number_of_bins = 10
 min_observation = -10
 max_observation = 30
-max_bid_price = 30
-max_total_quantity_demanded = 50
-number_of_price_levels = 10
-number_of_quantity_levels = 1
-capacity_offered = 100
+max_bid_price = 20
+max_total_quantity_demanded = 10
+number_of_price_levels = 3
+number_of_quantity_levels = 3
+capacity_offered = 10
 number_of_bidders = 10
 number_of_mc_simulations = 100
 number_of_auction_simulations = 1000
+soda_tolerance = 5e-3
+lp_relative_tolerance = 0.1
+max_iterations = 1000
 
 async def main():
     prior_price_spread_distribution = stats.norm(
@@ -52,7 +55,10 @@ async def main():
         capacity_offered,
         number_of_bidders,
         number_of_mc_simulations,
-        number_of_auction_simulations
+        number_of_auction_simulations,
+        soda_tolerance,
+        lp_relative_tolerance,
+        max_iterations
     )
      
 asyncio.run(main())

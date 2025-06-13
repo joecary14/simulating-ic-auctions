@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.stats import norm
+from time import time
 
 import optimisation.discretisation as discretisation
 import optimisation.optimiser as optimiser
@@ -19,8 +20,12 @@ def run_optimisation_one_period(
     number_of_quantity_levels: int,
     capacity_offered: float,
     number_of_bidders: int,
-    number_of_simulations: int
+    number_of_simulations: int,
+    soda_tolerance: float,
+    lp_relative_tolerance: float,
+    max_iterations: int
 ):
+    start_time = time()
     discrete_price_spread = discretisation.discretise_distribution(
         price_spread_prior_distribution,
         number_of_value_bins,
@@ -70,10 +75,17 @@ def run_optimisation_one_period(
         posterior_value_probabilities,
         number_of_bidders,
         number_of_simulations,
-        capacity_offered
+        capacity_offered,
+        soda_tolerance,
+        lp_relative_tolerance,
+        max_iterations
     )    
     
-    visualisation.visualise_as_heatmap(conditional_sigma)
+    # visualisation.visualise_as_heatmap(conditional_sigma)
+    end_time = time()
+    
+    print(f"Optimisation completed in {end_time - start_time:.2f} seconds.")
+    print(f"K = {number_of_value_bins}, L = {number_of_value_bins}, M = {len(possible_demand_schedules)}")
     
     return conditional_sigma, prior_value_probabilities, conditional_observation_probabilities, possible_demand_schedules
     
@@ -87,16 +99,15 @@ def solve_for_equilibrium(
     number_of_bidders: int,
     number_of_simulations: int,
     capacity_offered: float,
-    number_of_attempts: int = 10,
-    max_iter: int = 1000000,
-    lp_tol: float = 1
+    soda_tolerance: float,
+    lp_relative_tolerance: float,
+    max_iter: int,
 ) -> np.ndarray:
     current_conditional_sigma = None
     current_dual_variables = None
     current_start_index = 0
     
-    for attempt in range(number_of_attempts):
-        print(f"Attempt {attempt + 1} of {number_of_attempts}")
+    while current_start_index < max_iter - 1:
         new_conditional_sigma, new_dual_variables, last_iter = optimiser.soda_algorithm(
             possible_prior_values,
             possible_observations,
@@ -110,10 +121,11 @@ def solve_for_equilibrium(
             input_conditional_sigma=current_conditional_sigma,
             input_dual_variables=current_dual_variables,
             start_iteration_number=current_start_index,
-            max_iter=max_iter
+            max_iter=max_iter,
+            tol=soda_tolerance
         )
     
-        utility_loss = validation.check_for_equilibrium(
+        utility_loss = validation.calculate_utility_loss(
             new_conditional_sigma,
             marginal_observation_probabilities,
             conditional_observation_probabilities,
@@ -126,16 +138,15 @@ def solve_for_equilibrium(
             capacity_offered
         )
         
-        if utility_loss <= lp_tol:
+        if utility_loss <= lp_relative_tolerance:
             print(f"Convergence achieved in {last_iter} iterations with utility loss: {utility_loss}")
-            return new_conditional_sigma
+            break
         else:
-            print(f"Utility loss {utility_loss} exceeds tolerance {lp_tol}. Retrying...")
+            print(f"Utility loss {utility_loss} exceeds tolerance {lp_relative_tolerance}. Retrying...")
             current_conditional_sigma = new_conditional_sigma
             current_dual_variables = new_dual_variables
             current_start_index = last_iter + 1
     
-    print("Failed to converge within the specified number of attempts.")
     if current_conditional_sigma is not None:
         return current_conditional_sigma
     else:
