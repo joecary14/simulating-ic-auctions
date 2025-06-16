@@ -1,56 +1,59 @@
 import numpy as np
+import pandas as pd
 import optimisation.auction as auction
 import optimisation.optimisation_engine as optimisation_engine
+from simulation.auction_parameters import AuctionParameters
+from optimisation.solver_parameters import SolverParameters
+from simulation.settings import assign_auction_parameters
 
 def simulate_auction(
-    price_spread_prior_distribution,
-    min_prior_spread: float,
-    max_prior_spread: float,
-    number_of_value_bins: int,
-    min_observation: float,
-    max_observation: float,
-    max_bid_price: float,
-    max_total_quantity_demanded: float,
-    number_of_price_levels: int,
-    number_of_quantity_levels: int,
-    capacity_offered: float,
-    number_of_bidders: int,
-    number_of_mc_simulations: int,
+    read_in_filepath: str,
+    number_of_price_bins: int,
+    number_of_bid_price_bins: int,
+    number_of_bid_quantity_bins: int,
     number_of_auction_simulations: int,
-    soda_tolerance: float,
-    lp_relative_tolerance: float,
-    max_iterations: int
-) -> float:
-    conditional_sigma, prior_value_probabilities, conditional_observation_probabilities, possible_demand_schedules = optimisation_engine.run_optimisation_one_period(
-        price_spread_prior_distribution,
-        min_prior_spread,
-        max_prior_spread,
-        number_of_value_bins,
-        min_observation,
-        max_observation,
-        max_bid_price,
-        max_total_quantity_demanded,
-        number_of_price_levels,
-        number_of_quantity_levels,
-        capacity_offered,
-        number_of_bidders,
-        number_of_mc_simulations,
-        soda_tolerance,
-        lp_relative_tolerance,
-        max_iterations
+    solver_parameters: SolverParameters,
+    write_out_filepath: str
+) -> None:
+    auction_parameters_by_period = assign_auction_parameters(
+        read_in_filepath,
+        number_of_price_bins,
+        number_of_bid_price_bins,
+        number_of_bid_quantity_bins,
+        number_of_auction_simulations
     )
+    simulated_clearing_prices = []
+    utility_losses = []
+    for auction_parameters in auction_parameters_by_period:        
+        conditional_sigma, prior_value_probabilities, conditional_observation_probabilities, possible_demand_schedules, final_utility_loss = optimisation_engine.run_optimisation_one_period(
+            auction_parameters,
+            solver_parameters
+        )
+        
+        simulated_clearing_price = simulate_auction_clearing(
+            auction_parameters.number_of_auction_simulations,
+            conditional_sigma,
+            prior_value_probabilities,
+            conditional_observation_probabilities,
+            possible_demand_schedules,
+            auction_parameters.number_of_bidders,
+            auction_parameters.capacity_offered
+        )
+        print(f"Clearing Price: {simulated_clearing_price}")
+        print(f"Utility Loss: {final_utility_loss}")
+        simulated_clearing_prices.append(simulated_clearing_price)
+        utility_losses.append(final_utility_loss)
+        
+    outturn_price_spreads = [auction_parameters.central_prior_value for auction_parameters in auction_parameters_by_period]
+    actual_clearing_prices = [auction_parameters.actual_clearing_price for auction_parameters in auction_parameters_by_period]
+    results_df = pd.DataFrame({
+        'simulated_clearing_price': simulated_clearing_prices,
+        'actual_clearing_price': actual_clearing_prices,
+        'outturn_price_spread': outturn_price_spreads,
+        'utility_loss': utility_losses
+    })
     
-    simulated_clearing_price = simulate_auction_clearing(
-        number_of_auction_simulations,
-        conditional_sigma,
-        prior_value_probabilities,
-        conditional_observation_probabilities,
-        possible_demand_schedules,
-        number_of_bidders,
-        capacity_offered
-    )
-    print(f"Clearing Price: {simulated_clearing_price}")
-    return simulated_clearing_price
+    results_df.to_excel(write_out_filepath, index=False)
 
 def simulate_auction_clearing(
     number_of_outturn_values_to_draw: int,
@@ -66,8 +69,6 @@ def simulate_auction_clearing(
     number_of_possible_values = len(prior_value_probabilities)
     number_of_possible_bid_schedules = len(bid_schedules)
     for i in range(number_of_outturn_values_to_draw):
-        # Simulate the auction clearing process here
-        # For now, we will just use a random clearing price
         outturn_value_index = np.random.choice(
             number_of_possible_values,
             p=prior_value_probabilities)

@@ -4,7 +4,8 @@ import price_forecaster.data_collection as data_collection
 import price_forecaster.lear_forecast as lear_forecast
 import optimisation.optimisation_engine as engine
 import simulation.simulation_engine as simulation_engine
-import scipy.stats as stats
+
+from optimisation.solver_parameters import SolverParameters
 
 demand_filepath = '/Users/josephcary/Library/CloudStorage/OneDrive-Nexus365/First Year/Papers/Interconnection/Forecasting/Input Data/FR D-2 Demand Forecast.xlsx'
 be_demand_filepath = '/Users/josephcary/Library/CloudStorage/OneDrive-Nexus365/First Year/Papers/Interconnection/Forecasting/Input Data/BE D-7 Demand Forecast.xlsx'
@@ -21,11 +22,11 @@ central_price_spread_estimate = 10
 price_spread_stdev = 5
 min_prior_spread = -5
 max_prior_spread = 25 
-number_of_bins = 10
+number_of_price_bins = 10
 min_observation = -10
 max_observation = 30
 max_bid_price = 20
-max_total_quantity_demanded = 10
+max_total_quantity_demanded = 6
 number_of_price_levels = 3
 number_of_quantity_levels = 3
 capacity_offered = 10
@@ -35,30 +36,24 @@ number_of_auction_simulations = 1000
 soda_tolerance = 5e-3
 lp_relative_tolerance = 0.1
 max_iterations = 1000
+read_in_filepath = '/Users/josephcary/Library/CloudStorage/OneDrive-Nexus365/First Year/Papers/Interconnection/Code Testing/Auction Simulation Testing/18-2-24 Test.xlsx'
+output_filepath = '/Users/josephcary/Library/CloudStorage/OneDrive-Nexus365/First Year/Papers/Interconnection/Code Testing/Auction Simulation Testing/18-2-24 Results.xlsx'
 
 async def main():
-    prior_price_spread_distribution = stats.norm(
-        loc=central_price_spread_estimate, 
-        scale=price_spread_stdev
-    )
-    simulation_engine.simulate_auction(
-        prior_price_spread_distribution,
-        min_prior_spread,
-        max_prior_spread,
-        number_of_bins,
-        min_observation,
-        max_observation,
-        max_bid_price,
-        max_total_quantity_demanded,
-        number_of_price_levels,
-        number_of_quantity_levels,
-        capacity_offered,
-        number_of_bidders,
+    solver_parameters = SolverParameters(
         number_of_mc_simulations,
-        number_of_auction_simulations,
         soda_tolerance,
         lp_relative_tolerance,
         max_iterations
+    )
+    simulation_engine.simulate_auction(
+        read_in_filepath,
+        number_of_price_bins,
+        number_of_price_levels,
+        number_of_quantity_levels,
+        number_of_auction_simulations,
+        solver_parameters,
+        output_filepath
     )
      
 asyncio.run(main())
