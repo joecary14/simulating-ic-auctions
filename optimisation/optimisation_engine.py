@@ -108,11 +108,11 @@ def solve_for_equilibrium(
             number_of_bidders,
             number_of_simulations,
             capacity_offered,
-            input_conditional_sigma=current_conditional_sigma,
-            input_dual_variables=current_dual_variables,
-            start_iteration_number=current_start_index,
-            max_iter=max_iter,
-            tol=soda_tolerance
+            current_conditional_sigma,
+            current_dual_variables,
+            current_start_index,
+            max_iter,
+            soda_tolerance
         )
     
         utility_loss = validation.calculate_utility_loss(

@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 import optimisation.auction as auction
 import optimisation.optimisation_engine as optimisation_engine
-from simulation.auction_parameters import AuctionParameters
 from optimisation.solver_parameters import SolverParameters
 from simulation.settings import assign_auction_parameters
 

@@ -15,19 +15,19 @@ def soda_algorithm(
     capacity_offered: float,
     input_conditional_sigma: 'Optional[np.ndarray]',
     input_dual_variables: 'Optional[np.ndarray]',
-    start_iteration_number: int = 0,
-    max_iter: int = 1000000, 
-    tol: float=1e-3
+    start_iteration_number: int,
+    max_iter: int, 
+    tol: float
 ):
     K = len(possible_values)
     L = len(possible_observations)
     M = len(possible_demand_schedules)
     V_tuple = tuple(possible_values) 
-    
+    auction.cached_payoff.cache_clear()
     # Initialize dual variables Y and strategy matrix σ
     if input_conditional_sigma is None or input_dual_variables is None:
         Y = np.zeros((L, M))  # Dual variables
-        current_conditional_sigma = update_conditional_sigma(Y)
+        current_conditional_sigma = update_conditional_sigma_soda_1(Y)
         current_sigma = marginal_observation_probabilities[:, None] * current_conditional_sigma
     else:
         Y = input_dual_variables
@@ -54,7 +54,7 @@ def soda_algorithm(
         eta = 1 / np.sqrt(t + 1)  # Step size
         Y += eta * U
         
-        new_conditional_sigma = update_conditional_sigma(Y)
+        new_conditional_sigma = update_conditional_sigma_soda_1(Y)
         new_sigma = marginal_observation_probabilities[:, None] * new_conditional_sigma
         
         sigma_distance = np.max(np.abs(new_sigma - current_sigma))
@@ -151,7 +151,7 @@ def compute_expected_utilities(
     
     return U
 
-def update_conditional_sigma(
+def update_conditional_sigma_soda_1(
     Y: np.ndarray
 ) -> np.ndarray:
     row_max = Y.max(axis=1, keepdims=True)
@@ -160,3 +160,30 @@ def update_conditional_sigma(
     
     return conditional_sigma
 
+def update_conditional_sigma_soda_2(
+    Y: np.ndarray,
+    marginal_observation_probabilities: np.ndarray
+) -> np.ndarray:
+    W = Y + marginal_observation_probabilities[:, None]
+    row_sums = W.sum(axis=1, keepdims=True)
+    new_conditional_sigma = W / row_sums
+    return new_conditional_sigma
+
+def update_conditional_sigma_soma_2(U, marginal_observation_probabilities, eta):
+    """
+    SOMA2 update: Direct Euclidean mirror ascent step.
+
+    Inputs:
+        U: Utility matrix (L x M).
+        marginal_observation_probabilities: Marginal probabilities for each observation (L,).
+        eta: Step size for the update.
+
+    Returns:
+        new_conditional_sigma: Updated conditional probabilities (L x M).
+    """
+    # Compute the new strategy based on the gradient and step size
+    W = U * eta + marginal_observation_probabilities[:, None]
+    # Project onto the simplex (row normalization)
+    row_sums = W.sum(axis=1, keepdims=True)
+    new_conditional_sigma = W / row_sums
+    return new_conditional_sigma
