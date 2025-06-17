@@ -12,7 +12,7 @@ async def get_data_for_fr_lear_forecast(
     output_file_directory: str,
     output_filename: str
 ) -> None:
-    elexon_forecast_data = await get_elexon_data_for_years(
+    elexon_forecast_data = await get_elexon_forecast_data_for_years(
         years
     )
     
@@ -140,16 +140,16 @@ def read_in_fr_demand_forecast_data(
     
     return result_df
 
-async def get_elexon_data_for_years(
+async def get_elexon_forecast_data_for_years(
     years: list[int]
 ) -> pd.DataFrame   :
-    tasks = [get_elexon_lear_data_for_year(year) for year in years]
+    tasks = [get_elexon_forecast_data_for_year(year) for year in years]
     results = await asyncio.gather(*tasks)
     combined_forecasts = pd.concat(results, axis=0)
     
     return combined_forecasts
 
-async def get_elexon_lear_data_for_year(
+async def get_elexon_forecast_data_for_year(
     year: int,
 ) -> pd.DataFrame:
     start_date, end_date = datetime_functions.get_start_and_end_dates_from_year(year)

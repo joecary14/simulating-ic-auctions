@@ -18,16 +18,16 @@ elexon_data_filepath = '/Users/josephcary/Library/CloudStorage/OneDrive-Nexus365
 nl_data_filepath = '/Users/josephcary/Library/CloudStorage/OneDrive-Nexus365/First Year/Papers/Interconnection/Forecasting/Input Data/NL D-1 RES Forecasts.xlsx'
 country_code = 'BE'
 
-number_of_price_bins = 5
+number_of_price_bins = 12
 number_of_price_levels = 3
 number_of_quantity_levels = 3
-number_of_mc_simulations = 1000
+number_of_mc_simulations = 100
 number_of_auction_simulations = 1000
 soda_tolerance = 5e-3
 lp_relative_tolerance = 0.1
 max_iterations = 1000
-read_in_filepath = '/Users/josephcary/Library/CloudStorage/OneDrive-Nexus365/First Year/Papers/Interconnection/Code Testing/Auction Simulation Testing/18-2-24 Test.xlsx'
-output_filepath = '/Users/josephcary/Library/CloudStorage/OneDrive-Nexus365/First Year/Papers/Interconnection/Code Testing/Auction Simulation Testing/18-2-24 Results.xlsx'
+read_in_filepath = '/Users/josephcary/Library/CloudStorage/OneDrive-Nexus365/First Year/Papers/Interconnection/Code Testing/Auction Simulation Testing/27-1-24 Forecast Test.xlsx'
+output_filepath = '/Users/josephcary/Library/CloudStorage/OneDrive-Nexus365/First Year/Papers/Interconnection/Code Testing/Auction Simulation Testing/27-1-24 Forecast Test Results.xlsx'
 
 async def main():
     solver_parameters = SolverParameters(

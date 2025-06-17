@@ -81,6 +81,7 @@ def run_lear_forecast(
     plt.close()
     print(f"R^2 score: {r2:.4f}")
     print(f"Sign agreement: {sign_agreement:.2f}%")
+    combined_results_df.to_csv(output_filepath)
     
     return combined_results_df
 
@@ -102,7 +103,7 @@ def run_lear_forecast_by_day(
         datetimes = pd.date_range(start=test_date, periods=24, freq='h', tz='UTC')
         result_df = pd.DataFrame({
             'datetime': datetimes,
-            'prediction': predictions[0],
+            'prediction': predictions[0],  # type: ignore
             'actual': actuals[0]
         })
         results.append(result_df)

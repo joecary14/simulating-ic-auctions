@@ -71,5 +71,5 @@ def equilibrium_utility_loss(
     # Current strategy value
     current_value = np.sum(current_sigma * current_utility)
     
-    relative_gap = np.abs(float(best_value - current_value)/float(best_value))
+    relative_gap = np.abs(float(best_value - current_value)/float(best_value)) if  best_value != 0 else float('inf')
     return float(best_value), float(current_value), relative_gap

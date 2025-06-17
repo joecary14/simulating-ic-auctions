@@ -13,16 +13,17 @@ def assign_auction_parameters(
     capacities = central_prices_df['capacities_offered']
     number_of_bidders = central_prices_df['number_of_bidders']
     actual_clearing_prices = central_prices_df['actual_clearing_price']
-    default_prior_stdev = 2
-    default_observation_stdev = 1
+    scaled_capacities = capacities / 100
+    default_prior_stdev = 10
+    default_observation_stdev = 5
     min_prior_spread = prices - 3 * default_prior_stdev
     max_prior_spread = prices + 3 * default_prior_stdev
     auction_parameters = []
     for period in range(len(prices)):
         central_price = prices[period]
-        capacity_offered = capacities[period]
+        scaled_capacity_offered = scaled_capacities[period]
         auction_parameter = AuctionParameters(
-            capacity_offered,
+            scaled_capacity_offered,
             central_price,
             number_of_bidders[period],
             default_prior_stdev,
@@ -35,7 +36,7 @@ def assign_auction_parameters(
             number_of_bid_price_bins,
             number_of_quantity_levels,
             max_prior_spread[period] + default_observation_stdev,
-            capacity_offered,
+            scaled_capacity_offered,
             number_of_auction_simulations,
             actual_clearing_prices[period]
         )

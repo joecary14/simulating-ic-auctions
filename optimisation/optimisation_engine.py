@@ -130,6 +130,7 @@ def solve_for_equilibrium(
         
         if utility_loss <= lp_relative_tolerance:
             print(f"Convergence achieved in {last_iter} iterations with utility loss: {utility_loss}")
+            current_conditional_sigma = new_conditional_sigma
             final_utility_loss = utility_loss
             break
         else:

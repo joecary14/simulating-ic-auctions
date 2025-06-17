@@ -23,7 +23,7 @@ def simulate_auction(
     )
     simulated_clearing_prices = []
     utility_losses = []
-    for auction_parameters in auction_parameters_by_period:        
+    for period_index, auction_parameters in enumerate(auction_parameters_by_period):        
         conditional_sigma, prior_value_probabilities, conditional_observation_probabilities, possible_demand_schedules, final_utility_loss = optimisation_engine.run_optimisation_one_period(
             auction_parameters,
             solver_parameters
@@ -40,6 +40,7 @@ def simulate_auction(
         )
         print(f"Clearing Price: {simulated_clearing_price}")
         print(f"Utility Loss: {final_utility_loss}")
+        print(f"Period {period_index + 1} of {len(auction_parameters_by_period)}")
         simulated_clearing_prices.append(simulated_clearing_price)
         utility_losses.append(final_utility_loss)
         
