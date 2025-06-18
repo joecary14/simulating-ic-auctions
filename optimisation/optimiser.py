@@ -1,5 +1,7 @@
 import numpy as np
 from typing import Optional, Tuple
+from cvxopt import matrix, solvers
+from scipy.optimize import linprog
 import optimisation.auction as auction
 import optimisation.visualisation as visualisation
 
@@ -54,8 +56,17 @@ def soda_algorithm(
         eta = 1 / np.sqrt(t + 1)  # Step size
         Y += eta * U
         
-        new_conditional_sigma = update_conditional_sigma_soda_1(Y)
-        new_sigma = marginal_observation_probabilities[:, None] * new_conditional_sigma
+        # new_sigma = update_sigma_soda_2(Y, marginal_observation_probabilities)
+        new_sigma = frank_wolfe_update_sigma(
+            current_sigma,
+            U,
+            marginal_observation_probabilities,
+            t
+        )
+        new_conditional_sigma = new_sigma / marginal_observation_probabilities[:, np.newaxis]
+        
+        # new_conditional_sigma = update_conditional_sigma_soda_1(Y)
+        # new_sigma = marginal_observation_probabilities[:, None] * new_conditional_sigma
         
         sigma_distance = np.max(np.abs(new_sigma - current_sigma))
         mean_distance = np.mean(np.abs(new_sigma - current_sigma))
@@ -160,30 +171,95 @@ def update_conditional_sigma_soda_1(
     
     return conditional_sigma
 
-def update_conditional_sigma_soda_2(
-    Y: np.ndarray,
-    marginal_observation_probabilities: np.ndarray
-) -> np.ndarray:
-    W = Y + marginal_observation_probabilities[:, None]
-    row_sums = W.sum(axis=1, keepdims=True)
-    new_conditional_sigma = W / row_sums
-    return new_conditional_sigma
+def frank_wolfe_update_sigma(
+    current_sigma: np.ndarray,
+    current_utility: np.ndarray,
+    marginal_observation_probabilities: np.ndarray,
+    iteration_index: int
+):
+    L, M = current_utility.shape
+    c = -current_utility.flatten()              # we will minimize cᵀ x = -U⋅s' ⇒ max U⋅s'
+    
+    # Equality constraints: for each k, ∑_ℓ s'_{kℓ} = p_o[k]
+    A_eq = np.zeros((L, L*M))
+    for l in range(L):
+        A_eq[l, l*M:(l+1)*M] = 1.0
+    b_eq = marginal_observation_probabilities.copy()
+    
+    # Bounds: s'_{kℓ} ≥ 0
+    bounds = [(0, 1)] * (L*M)
+    
+    # Solve LP
+    res = linprog(c=c,
+                A_eq=A_eq, b_eq=b_eq,
+                bounds=bounds,
+                method="highs")
+    if not res.success:
+        raise RuntimeError(f"Best-response LP failed: {res.message}")
+    
+    best_response_matrix = res.x.reshape((L, M))
+    
+    step_size = 2/(1+1+iteration_index)
+    
+    new_sigma = (1-step_size)*current_sigma + step_size * best_response_matrix
+    
+    return new_sigma
+    
 
-def update_conditional_sigma_soma_2(U, marginal_observation_probabilities, eta):
+def update_sigma_soda_2(Y: np.ndarray, marginal_observation_probabilities: np.ndarray) -> np.ndarray:
     """
-    SOMA2 update: Direct Euclidean mirror ascent step.
-
-    Inputs:
-        U: Utility matrix (L x M).
-        marginal_observation_probabilities: Marginal probabilities for each observation (L,).
-        eta: Step size for the update.
-
-    Returns:
-        new_conditional_sigma: Updated conditional probabilities (L x M).
+    Updates the joint distribution matrix (sigma) in SODA_2.
+    
+    Maximizes: sum_k s_k^2 - 2*sum_k s_k*y_k
+    Subject to: sum_k s_k = mass, s_k >= 0
     """
-    # Compute the new strategy based on the gradient and step size
-    W = U * eta + marginal_observation_probabilities[:, None]
-    # Project onto the simplex (row normalization)
-    row_sums = W.sum(axis=1, keepdims=True)
-    new_conditional_sigma = W / row_sums
-    return new_conditional_sigma
+    L, M = Y.shape
+    sigma = np.zeros_like(Y)
+    
+    for l in range(L):
+        y = Y[l, :]
+        mass = marginal_observation_probabilities[l]
+        
+        # Handle zero or very small masses
+        if mass < 1e-10:
+            sigma[l, :] = 0
+            continue
+        
+        # For MAXIMIZATION, negate the objective
+        # max(sum s_k^2 - 2*sum s_k*y_k) = min(-(sum s_k^2 - 2*sum s_k*y_k))
+        # = min(-sum s_k^2 + 2*sum s_k*y_k)
+        
+        Q = 2 * np.eye(M)    # Positive definite for minimization (was -2)
+        c = -2 * y           # Negate the linear term (was +2*y)
+        
+        A = np.ones((1, M))  # Equality constraint: sum s_k = mass
+        b = np.array([mass])
+        
+        G = -np.eye(M)       # Inequality constraint: s_k >= 0
+        h = np.zeros(M)
+        
+        # Convert to cvxopt format
+        Q = matrix(Q)
+        c = matrix(c)
+        A = matrix(A)
+        b = matrix(b)
+        G = matrix(G)
+        h = matrix(h)
+        
+        # Suppress solver output
+        solvers.options['show_progress'] = False
+        
+        try:
+            sol = solvers.qp(Q, c, G, h, A, b)
+            if sol['status'] == 'optimal':
+                sigma[l, :] = np.array(sol['x']).flatten()
+            else:
+                print(f"QP solver failed for row {l}: {sol['status']}")
+                # Fallback: uniform distribution
+                sigma[l, :] = mass / M
+        except Exception as e:
+            print(f"QP solver error for row {l}: {e}")
+            # Fallback: uniform distribution
+            sigma[l, :] = mass / M
+    
+    return sigma

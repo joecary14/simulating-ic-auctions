@@ -30,18 +30,7 @@ def run_lear_forecast(
         start_test_date,
         end_test_date
     )
-
-    # lower_actual = combined_results_df['actual'].quantile(0.05)
-    # upper_actual = combined_results_df['actual'].quantile(0.95)
-    # lower_pred = combined_results_df['prediction'].quantile(0.05)
-    # upper_pred = combined_results_df['prediction'].quantile(0.95)
-
-    # filtered_df = combined_results_df[
-    #     (combined_results_df['actual'] >= lower_actual) &
-    #     (combined_results_df['actual'] <= upper_actual) &
-    #     (combined_results_df['prediction'] >= lower_pred) &
-    #     (combined_results_df['prediction'] <= upper_pred)
-    # ]
+    
     plt.figure(figsize=(8, 6))
     plt.tick_params(axis='both', which='both', direction='in', length=6, width=2, colors='black')
     ax = plt.gca()
@@ -54,8 +43,8 @@ def run_lear_forecast(
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     plt.scatter(combined_results_df['actual'], combined_results_df['prediction'], alpha=0.5)
-    plt.xlabel('Filtered Actual')
-    plt.ylabel('Filtered Prediction')
+    plt.xlabel('Actual')
+    plt.ylabel('Prediction')
     plt.title('5-95th percentile Predicted vs Actual Scatter Plot')
     plt.grid(True)
     plt.tight_layout()

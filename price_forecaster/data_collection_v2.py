@@ -17,7 +17,7 @@ async def get_data_for_fr_lear_forecast(
         years
     )
     
-    fr_nuclear_proportion_data = read_in_fr_data(
+    fr_nuclear_generation = read_in_fr_data(
         fr_data_filepath
     )
     
@@ -28,7 +28,7 @@ async def get_data_for_fr_lear_forecast(
     
     merged_df = pd.merge(
         price_spread_data,
-        fr_nuclear_proportion_data,
+        fr_nuclear_generation,
         on='datetime',
         how='left'
     )
@@ -43,7 +43,9 @@ async def get_data_for_fr_lear_forecast(
         merged_df = merged_df.drop(columns=['start_time'])
         
     merged_df = merged_df.set_index('datetime').sort_index()
+    merged_df = merged_df[~merged_df.index.duplicated(keep='first')]
     merged_df = merged_df[merged_df.index.year.isin(years)]
+    
     for col in merged_df.columns:
         data_collection_v1.populate_missing_values_with_day_before_values(
             col,
@@ -51,16 +53,10 @@ async def get_data_for_fr_lear_forecast(
         )
     merged_df = merged_df.reset_index()
         
-    merged_df = merged_df[merged_df['datetime'].dt.year.isin(years)]
-    spread_cols = [col for col in merged_df.columns if col.startswith('GB-')]
-    other_cols = [col for col in merged_df.columns if col not in spread_cols + ['datetime']]
-    merged_df = merged_df[['datetime'] + spread_cols + other_cols]
-    merged_df = merged_df.sort_values('datetime').reset_index(drop=True)
-    spread_col = [col for col in merged_df.columns if col.startswith('GB-')][0]
-    merged_df = merged_df.rename(columns={spread_col: 'Price'})
-    exog_cols = [col for col in merged_df.columns if col not in ['datetime', 'Price']]
-    exog_rename = {col: f'Exogenous {i+1}' for i, col in enumerate(exog_cols)}
-    merged_df = merged_df.rename(columns=exog_rename)
+    merged_df = data_collection_v1.rename_columns(
+        merged_df,
+        years
+    )
 
     merged_df.to_csv(output_file_directory + output_filename, index=False)
     print(f"Data for FR LEAR forecast saved to {output_file_directory + output_filename}")
@@ -109,13 +105,14 @@ async def get_elexon_forecast_data_for_year(
     return combined_df
 
 def read_in_fr_data(
-    demand_data_filepath: str
+    fr_data_filepath: str
 ) -> pd.DataFrame:
-    data = pd.read_excel(demand_data_filepath)
+    data = pd.read_excel(fr_data_filepath)
     data['UTC Datetime'] = pd.to_datetime(data['UTC Datetime'], utc=True)
-    nuclear_generation = data[['UTC Datetime', 'Nuclear Generation']]
+    fr_nuclear_generation = data[['UTC Datetime', 'Nuclear Generation']].copy()
+    fr_nuclear_generation.rename(columns={'UTC Datetime': 'datetime'}, inplace=True)
     
-    return nuclear_generation
+    return fr_nuclear_generation
 
 def get_data_for_be_lear_forecast(
     be_demand_data_filepath: str,
@@ -169,15 +166,16 @@ def get_data_for_be_lear_forecast(
     )
 
     merged_df.to_csv(output_file_directory + output_filename, index=False)
+    print(f"Data for BE LEAR forecast saved to {output_file_directory + output_filename}")
 
 def read_in_be_demand_data(
     demand_data_filepath: str
 ) -> pd.DataFrame:
     data = pd.read_excel(demand_data_filepath)
-    data['datetime'] = pd.to_datetime(data['Brussels Datetime']).dt.tz_convert('UTC')
+    data['datetime'] = pd.to_datetime(data['datetime'], utc=True)
     demand_forecast = data[['datetime', 'Load']]
     demand_forecast = demand_forecast.set_index('datetime')
-    demand_forecast = demand_forecast.resample('H').mean()
+    demand_forecast = demand_forecast.resample('h').mean()
     demand_forecast = demand_forecast.reset_index()
     
     return demand_forecast
@@ -241,5 +239,6 @@ def read_in_dk1_forecast_data(
 ) -> pd.DataFrame:
     data = pd.read_excel(dk1_res_forecast_data)
     data['datetime'] = pd.to_datetime(data['UTC Datetime'], utc=True)
+    data.drop(columns=['UTC Datetime'], inplace=True)
     
     return data

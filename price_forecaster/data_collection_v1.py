@@ -185,7 +185,7 @@ def combine_values(
     demand_forecast_df['hour'] = demand_forecast_df['start_time'].dt.floor('h')
     hourly_demand_forecast_data = demand_forecast_df.groupby('hour')['tsdf'].mean().reset_index()
     hourly_demand_forecast_data.rename(columns={'hour': 'start_time'}, inplace=True)
-    hourly_demand_forecast_data['start_time'] = pd.to_datetime(hourly_demand_forecast_data['start_time']).dt.tz_localize('UTC')
+    hourly_demand_forecast_data['start_time'] = pd.to_datetime(hourly_demand_forecast_data['start_time'])
     wind_forecast_df['start_time'] = pd.to_datetime(wind_forecast_df['start_time'])
 
     combined_df = pd.merge(

@@ -223,8 +223,8 @@ async def get_hour_ahead_wind_forecast(
                 wind_forecasts.append(wind_forecast)
     
     wind_forecasts_df = pd.DataFrame({
-        'settlement_start_time': settlement_start_times,
-        'wind_forecast': wind_forecasts
+        'start_time': settlement_start_times,
+        'generation': wind_forecasts
     })
     
     return wind_forecasts_df  
@@ -246,11 +246,11 @@ async def get_actual_total_load(
         else:
             end_date = date_objs[-1]
         date_ranges.append((start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")))
-        i += 7
+        i += 8
     tasks = [
-        demand_api.demand_actual_total_get(
-            _from=start_date,
-            to=end_date,
+        demand_api.demand_outturn_get(
+            settlement_date_from=start_date,
+            settlement_date_to=end_date,
             format='dataframe',
             async_req=True
         )
@@ -259,15 +259,25 @@ async def get_actual_total_load(
     
     results = await asyncio.gather(*[asyncio.to_thread(task.get) for task in tasks])
     processed_results = []
-    for result_df, (_, end_date) in zip(results, date_ranges):
-        if not result_df.empty and 'start_time' in result_df.columns:
-            result_df['start_time'] = pd.to_datetime(result_df['start_time'])
-            mask = result_df['start_time'].dt.date != datetime.strptime(end_date, "%Y-%m-%d").date()
-            result_df = result_df[mask]
-        processed_results.append(result_df)
+    for result_df, (start_date, end_date) in zip(results, date_ranges):
+        if result_df.empty:
+            atl_df = await asyncio.to_thread(
+                demand_api.demand_outturn_get(
+                    _from=start_date,
+                    to=end_date,
+                    format='dataframe',
+                    async_req=True
+                ).get
+            )
+            atl_df = atl_df[['start_time, quantity']]
+            atl_df.rename(columns={'quantity': 'tsdf'}, inplace=True)
+            processed_results.append(atl_df)
+        else:
+            result_df = result_df[['start_time', 'initial_transmission_system_demand_outturn']]
+            processed_results.append(result_df.rename(columns={'initial_transmission_system_demand_outturn': 'tsdf'}))
+            
 
     final_df = pd.concat(processed_results, ignore_index=True)
-    final_df = final_df[['start_time', 'quantity']]
     
     return final_df
 
