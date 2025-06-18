@@ -260,16 +260,10 @@ def get_data_for_be_lear_forecast(
         )
     merged_df = merged_df.reset_index()
         
-    merged_df = merged_df[merged_df['datetime'].dt.year.isin(years)]
-    spread_cols = [col for col in merged_df.columns if col.startswith('GB-')]
-    other_cols = [col for col in merged_df.columns if col not in spread_cols + ['datetime']]
-    merged_df = merged_df[['datetime'] + spread_cols + other_cols]
-    merged_df = merged_df.sort_values('datetime').reset_index(drop=True)
-    spread_col = [col for col in merged_df.columns if col.startswith('GB-')][0]
-    merged_df = merged_df.rename(columns={spread_col: 'Price'})
-    exog_cols = [col for col in merged_df.columns if col not in ['datetime', 'Price']]
-    exog_rename = {col: f'Exogenous {i+1}' for i, col in enumerate(exog_cols)}
-    merged_df = merged_df.rename(columns=exog_rename)
+    merged_df = rename_columns(
+        merged_df,
+        years
+    )
 
     merged_df.to_csv(output_file_directory + output_filename, index=False)
 
@@ -332,18 +326,13 @@ def get_data_for_dk1_lear_forecast(
         )
     merged_df = merged_df.reset_index()
         
-    merged_df = merged_df[merged_df['datetime'].dt.year.isin(years)]
-    spread_cols = [col for col in merged_df.columns if col.startswith('GB-')]
-    other_cols = [col for col in merged_df.columns if col not in spread_cols + ['datetime']]
-    merged_df = merged_df[['datetime'] + spread_cols + other_cols]
-    merged_df = merged_df.sort_values('datetime').reset_index(drop=True)
-    spread_col = [col for col in merged_df.columns if col.startswith('GB-')][0]
-    merged_df = merged_df.rename(columns={spread_col: 'Price'})
-    exog_cols = [col for col in merged_df.columns if col not in ['datetime', 'Price']]
-    exog_rename = {col: f'Exogenous {i+1}' for i, col in enumerate(exog_cols)}
-    merged_df = merged_df.rename(columns=exog_rename)
+    merged_df = rename_columns(
+        merged_df,
+        years
+    )
 
     merged_df.to_csv(output_file_directory + output_filename, index=False)
+    print(f"Data for DK1 LEAR forecast saved to {output_file_directory + output_filename}")
 
 def read_in_dk1_forecast_data(
     read_in_filepath: str
@@ -401,16 +390,10 @@ def get_data_for_nl_lear_forecast(
         )
     merged_df = merged_df.reset_index()
         
-    merged_df = merged_df[merged_df['datetime'].dt.year.isin(years)]
-    spread_cols = [col for col in merged_df.columns if col.startswith('GB-')]
-    other_cols = [col for col in merged_df.columns if col not in spread_cols + ['datetime']]
-    merged_df = merged_df[['datetime'] + spread_cols + other_cols]
-    merged_df = merged_df.sort_values('datetime').reset_index(drop=True)
-    spread_col = [col for col in merged_df.columns if col.startswith('GB-')][0]
-    merged_df = merged_df.rename(columns={spread_col: 'Price'})
-    exog_cols = [col for col in merged_df.columns if col not in ['datetime', 'Price']]
-    exog_rename = {col: f'Exogenous {i+1}' for i, col in enumerate(exog_cols)}
-    merged_df = merged_df.rename(columns=exog_rename)
+    merged_df = rename_columns(
+        merged_df,
+        years
+    )
 
     merged_df.to_csv(output_file_directory + output_filename, index=False)
 
@@ -426,3 +409,20 @@ def read_in_nl_forecast_data(
     hourly_df['datetime'] = hourly_df['datetime'].dt.tz_convert('UTC').dt.floor('h')
 
     return hourly_df
+
+def rename_columns(
+    merged_df: pd.DataFrame,
+    years: list[int]
+) -> pd.DataFrame:
+    merged_df = merged_df[merged_df['datetime'].dt.year.isin(years)]
+    spread_cols = [col for col in merged_df.columns if col.startswith('GB-')]
+    other_cols = [col for col in merged_df.columns if col not in spread_cols + ['datetime']]
+    merged_df = merged_df[['datetime'] + spread_cols + other_cols]
+    merged_df = merged_df.sort_values('datetime').reset_index(drop=True)
+    spread_col = [col for col in merged_df.columns if col.startswith('GB-')][0]
+    merged_df = merged_df.rename(columns={spread_col: 'Price'})
+    exog_cols = [col for col in merged_df.columns if col not in ['datetime', 'Price']]
+    exog_rename = {col: f'Exogenous {i+1}' for i, col in enumerate(exog_cols)}
+    merged_df = merged_df.rename(columns=exog_rename)
+    
+    return merged_df

@@ -19,6 +19,16 @@ def get_settlement_dates_and_settlement_periods_per_day(start_date, end_date, co
                                                  for key, value in dates_with_settlement_periods_per_day.items()}
     return dates_with_settlement_periods_per_day
 
+def get_settlement_dates_and_times(start_date, end_date):
+    date_list = generate_settlement_dates(start_date, end_date)
+    utc_hourly_datetimes = []
+    for date in date_list:
+        for hour in range(24):
+            dt = gb_timezone.localize(datetime(date.year, date.month, date.day, hour, 0))
+            dt_utc = dt.astimezone(pytz.utc)
+            utc_hourly_datetimes.append(dt_utc)
+    return utc_hourly_datetimes
+
 def get_list_of_settlement_dates_and_periods(settlement_dates_with_periods_per_day : dict):
     settlement_dates_and_periods = []
     for settlement_date, settlement_periods_in_day in settlement_dates_with_periods_per_day.items():
@@ -27,7 +37,7 @@ def get_list_of_settlement_dates_and_periods(settlement_dates_with_periods_per_d
             
     return settlement_dates_and_periods
 
-def generate_settlement_dates(start_date, end_date, format_date_time_as_string = False):
+def generate_settlement_dates(start_date, end_date, format_date_time_as_string = False) -> list[str | datetime]:
     date_list = [(start_date + timedelta(days=i)) for i in range((end_date - start_date).days + 1)]
     
     if format_date_time_as_string:
@@ -75,23 +85,23 @@ def translate_settlement_dates_and_periods_to_timestamps(settlement_dates_and_pe
     return translations
 
 def add_settlement_time_to_end_of_list(datetimes):
-        if not datetimes:
-            return datetimes
-        last_dt_str = datetimes[-1]
-        last_dt = datetime.fromisoformat(last_dt_str)
-        last_dt_plus_half_hour = last_dt + timedelta(minutes=30)
-        return datetimes + [last_dt_plus_half_hour.isoformat()]  
+    if not datetimes:
+        return datetimes
+    last_dt_str = datetimes[-1]
+    last_dt = datetime.fromisoformat(last_dt_str)
+    last_dt_plus_half_hour = last_dt + timedelta(minutes=30)
+    return datetimes + [last_dt_plus_half_hour.isoformat()]  
 
 def get_timestamp_from_settlement_date_and_period(settlement_date_and_period):
-            date_str, period_str = settlement_date_and_period.rsplit('-', 1)
-            settlement_date = datetime.strptime(date_str, '%Y-%m-%d')
-            settlement_period = int(period_str)
-            base_time = gb_timezone.localize(settlement_date)
-            offset_minutes = (settlement_period - 1) * 30
-            timestamp = base_time + timedelta(minutes=offset_minutes)
-            timestamp_utc = timestamp.astimezone(pytz.utc).isoformat()
+    date_str, period_str = settlement_date_and_period.rsplit('-', 1)
+    settlement_date = datetime.strptime(date_str, '%Y-%m-%d')
+    settlement_period = int(period_str)
+    base_time = gb_timezone.localize(settlement_date)
+    offset_minutes = (settlement_period - 1) * 30
+    timestamp = base_time + timedelta(minutes=offset_minutes)
+    timestamp_utc = timestamp.astimezone(pytz.utc).isoformat()
 
-            return timestamp_utc
+    return timestamp_utc
 
 def get_time_as_string_from_np_datetime(datetime_obj):
     pd_timestamp = pd.Timestamp(datetime_obj)

@@ -1,6 +1,6 @@
 import asyncio
 import model.engine as engine
-import price_forecaster.data_collection as data_collection
+import price_forecaster.data_collection_v1 as data_collection_v1
 import price_forecaster.lear_forecast as lear_forecast
 import optimisation.optimisation_engine as engine
 import simulation.simulation_engine as simulation_engine

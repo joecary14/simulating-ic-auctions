@@ -179,6 +179,98 @@ async def get_missing_wind_data_for_day(
     
     return grouped
 
+async def get_hour_ahead_wind_forecast(
+    settlement_start_times: list[str],
+    api_client: ApiClient
+) -> pd.DataFrame:
+    generation_api = GenerationApi(api_client)
+    generation_forecast_api = GenerationForecastApi(api_client)
+    tasks = [
+        generation_forecast_api.forecast_generation_wind_evolution_get(
+            settlement_start_time,
+            format='dataframe',
+            async_req=True
+        )
+        for settlement_start_time in settlement_start_times
+    ]
+    
+    results = await asyncio.gather(*[asyncio.to_thread(task.get) for task in tasks])
+    wind_forecasts = []
+    for settlement_start_time, result_df in zip(settlement_start_times, results):
+        if result_df.empty:
+            wind_data_df = await get_missing_wind_data_for_day(
+                settlement_start_time,
+                settlement_start_time,
+                generation_api
+            )
+            actual_wind_generation = wind_data_df['generation'].sum()
+            wind_forecasts.append(actual_wind_generation)
+        else:
+            result_df['start_time'] = pd.to_datetime(result_df['start_time'])
+            hour_ahead_time = pd.to_datetime(settlement_start_time) + timedelta(hours=1)
+            forecast_df = result_df[result_df['start_time'] <= hour_ahead_time]
+            if forecast_df.empty:
+                wind_data_df = await get_missing_wind_data_for_day(
+                settlement_start_time,
+                settlement_start_time,
+                generation_api
+            )
+                actual_wind_generation = wind_data_df['generation'].sum()
+                wind_forecasts.append(actual_wind_generation)
+            else:
+                latest_entry = forecast_df.sort_values('start_time').iloc[-1]
+                wind_forecast = latest_entry['generation']
+                wind_forecasts.append(wind_forecast)
+    
+    wind_forecasts_df = pd.DataFrame({
+        'settlement_start_time': settlement_start_times,
+        'wind_forecast': wind_forecasts
+    })
+    
+    return wind_forecasts_df  
+
+async def get_actual_total_load(
+    settlement_dates: list[str|datetime],
+    api_client: ApiClient
+) -> pd.DataFrame:
+    demand_api = DemandApi(api_client)
+    date_objs = [datetime.strptime(date_str, "%Y-%m-%d") for date_str in settlement_dates]
+    date_objs.sort()
+    date_ranges = []
+    i = 0
+    n = len(date_objs)
+    while i < n:
+        start_date = date_objs[i]
+        if i + 7 < n:
+            end_date = date_objs[i + 7]
+        else:
+            end_date = date_objs[-1]
+        date_ranges.append((start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")))
+        i += 7
+    tasks = [
+        demand_api.demand_actual_total_get(
+            _from=start_date,
+            to=end_date,
+            format='dataframe',
+            async_req=True
+        )
+        for (start_date, end_date) in date_ranges
+    ]
+    
+    results = await asyncio.gather(*[asyncio.to_thread(task.get) for task in tasks])
+    processed_results = []
+    for result_df, (_, end_date) in zip(results, date_ranges):
+        if not result_df.empty and 'start_time' in result_df.columns:
+            result_df['start_time'] = pd.to_datetime(result_df['start_time'])
+            mask = result_df['start_time'].dt.date != datetime.strptime(end_date, "%Y-%m-%d").date()
+            result_df = result_df[mask]
+        processed_results.append(result_df)
+
+    final_df = pd.concat(processed_results, ignore_index=True)
+    final_df = final_df[['start_time', 'quantity']]
+    
+    return final_df
+
 def infer_cutoff_time(settlement_date: str) -> str:
     settlement_date_obj = datetime.strptime(settlement_date, "%Y-%m-%d")
     cutoff_time = settlement_date_obj - timedelta(days=1)
