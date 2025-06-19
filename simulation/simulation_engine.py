@@ -14,7 +14,7 @@ def simulate_auction(
     solver_parameters: SolverParameters,
     write_out_filepath: str
 ) -> None:
-    auction_parameters_by_period = assign_auction_parameters(
+    auction_parameters_by_period, price_scale_factors = assign_auction_parameters(
         read_in_filepath,
         number_of_price_bins,
         number_of_bid_price_bins,
@@ -23,13 +23,19 @@ def simulate_auction(
     )
     simulated_clearing_prices = []
     utility_losses = []
-    for period_index, auction_parameters in enumerate(auction_parameters_by_period):        
+    for period_index, auction_parameters in enumerate(auction_parameters_by_period):    
+        if auction_parameters.max_bid_price == 0 or auction_parameters.capacity_offered == 0:
+            print(f"Skipping period {period_index + 1} due to zero max bid price or capacity offered.")
+            simulated_clearing_prices.append(0.0)
+            utility_losses.append(0.0)
+            continue    
         conditional_sigma, prior_value_probabilities, conditional_observation_probabilities, possible_demand_schedules, final_utility_loss = optimisation_engine.run_optimisation_one_period(
             auction_parameters,
             solver_parameters
         )
         
         simulated_clearing_price = simulate_auction_clearing(
+            price_scale_factors[period_index],
             auction_parameters.number_of_auction_simulations,
             conditional_sigma,
             prior_value_probabilities,
@@ -56,6 +62,7 @@ def simulate_auction(
     results_df.to_excel(write_out_filepath, index=False)
 
 def simulate_auction_clearing(
+    price_scale_factor: float,
     number_of_outturn_values_to_draw: int,
     conditional_distributional_strategies: np.ndarray,
     prior_value_probabilities: np.ndarray,
@@ -84,6 +91,7 @@ def simulate_auction_clearing(
             bid_schedule = bid_schedules[bid_index]
             bid_schedules_by_participant.append(bid_schedule)
         
+        
         clearing_price, allocations_by_participant = auction.clear_auction(
             bid_schedules_by_participant,
             capacity_offered
@@ -91,4 +99,5 @@ def simulate_auction_clearing(
         total_clearing_price += clearing_price
     
     average_clearing_price = total_clearing_price / number_of_outturn_values_to_draw
-    return average_clearing_price
+    rescaled_average_clearing_price = average_clearing_price/price_scale_factor
+    return rescaled_average_clearing_price

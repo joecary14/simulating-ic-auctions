@@ -13,8 +13,7 @@ def calculate_utility_loss(
     possible_values: tuple[float, ...],
     number_of_mc_simulations: int,
     number_of_participants: int,
-    capacity_offered: float,
-    tol: float = 1e-4
+    capacity_offered: float
 ) -> float:
     current_utility = optimiser.compute_expected_utilities(
         current_conditional_sigma,
@@ -32,8 +31,7 @@ def calculate_utility_loss(
     best_value, current_value, relative_gap = equilibrium_utility_loss(
         current_utility,
         marginal_observation_probabilities,
-        current_sigma,
-        tol=tol
+        current_sigma
     )
     
     print(f"Best response value: {best_value}, Current value: {current_value}, Relative Gap: {relative_gap}")
@@ -42,8 +40,7 @@ def calculate_utility_loss(
 def equilibrium_utility_loss(
     current_utility: np.ndarray,
     marginal_observation_probabilities: np.ndarray,
-    current_sigma: np.ndarray,
-    tol: float = 1e-4
+    current_sigma: np.ndarray
 ) -> tuple[float, float, float]:
     L, M = current_utility.shape
     c = -current_utility.flatten()              # we will minimize cᵀ x = -U⋅s' ⇒ max U⋅s'
@@ -71,5 +68,5 @@ def equilibrium_utility_loss(
     # Current strategy value
     current_value = np.sum(current_sigma * current_utility)
     
-    relative_gap = np.abs(float(best_value - current_value)/float(best_value)) if  best_value != 0 else float('inf')
+    relative_gap = np.abs(float(best_value - current_value)/float(current_value)) if  best_value != 0 else float('inf')
     return float(best_value), float(current_value), relative_gap

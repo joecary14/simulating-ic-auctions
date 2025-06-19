@@ -38,7 +38,7 @@ def soda_algorithm(
     convergence_history = []
     last_iteration = 0
     # Main SODA loop
-    for t in range(start_iteration_number, max_iter + start_iteration_number):
+    for t in range(start_iteration_number, max_iter):
         print(f"Iteration {t+1} of {max_iter}")
         U = compute_expected_utilities(
             current_conditional_sigma,
@@ -57,16 +57,16 @@ def soda_algorithm(
         Y += eta * U
         
         # new_sigma = update_sigma_soda_2(Y, marginal_observation_probabilities)
-        new_sigma = frank_wolfe_update_sigma(
-            current_sigma,
-            U,
-            marginal_observation_probabilities,
-            t
-        )
-        new_conditional_sigma = new_sigma / marginal_observation_probabilities[:, np.newaxis]
+        # new_sigma = frank_wolfe_update_sigma(
+        #     current_sigma,
+        #     U,
+        #     marginal_observation_probabilities,
+        #     t
+        # )
+        # new_conditional_sigma = new_sigma / marginal_observation_probabilities[:, np.newaxis]
         
-        # new_conditional_sigma = update_conditional_sigma_soda_1(Y)
-        # new_sigma = marginal_observation_probabilities[:, None] * new_conditional_sigma
+        new_conditional_sigma = update_conditional_sigma_soda_1(Y)
+        new_sigma = marginal_observation_probabilities[:, None] * new_conditional_sigma
         
         sigma_distance = np.max(np.abs(new_sigma - current_sigma))
         mean_distance = np.mean(np.abs(new_sigma - current_sigma))
@@ -77,7 +77,7 @@ def soda_algorithm(
         if three_point_average_sigma_distance < tol:
             print(f"Converged after {t+1} iterations.")
             # visualisation.plot_convergence(convergence_history)
-            last_iteration = t + 1
+            last_iteration = t
             return new_conditional_sigma, Y, last_iteration
         
         current_conditional_sigma = new_conditional_sigma.copy()
