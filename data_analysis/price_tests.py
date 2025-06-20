@@ -3,11 +3,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.stats as stats
 import statsmodels.api as sm
+import datetime
 from typing import Dict
 from scipy.stats import shapiro, wilcoxon
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
+from scipy.stats import rv_continuous
 from sklearn.preprocessing import StandardScaler
+from scipy.stats import t, norm, genpareto
+from scipy.optimize import minimize
 
 def process_raw_data(
     raw_data_filepath: str
@@ -120,20 +124,48 @@ def generate_qq_plots(
         
         
 def add_rolling_volatility(df: pd.DataFrame, window=48):
-    df['rolling_volatility_price_spread'] = df['outturn_price_spread'].rolling(window=window, min_periods=1).std()
-    df['rolling_volatility_GB_price_spread'] = df['GB Price'].rolling(window=window, min_periods=1).std()
-    price_columns = [col for col in df.columns if 'price' in col.lower() and 'gb' not in col.lower()]
-    if price_columns:
-        df[f'rolling_volatility_{price_columns[0]}'] = df[price_columns[0]].rolling(window=window).std()
-    return df
+    df['datetime'] = pd.to_datetime(df['UTC Datetime'])
+    df = df.sort_values('datetime')
+    df['day'] = df['datetime'].dt.date
+    df['hour'] = df['datetime'].dt.hour
 
-def add_hourly_dummy_variables(
-    df: pd.DataFrame
-) -> pd.DataFrame:
-    df['hour'] = pd.to_datetime(df['UTC Datetime']).dt.hour
-    for hour in range(24):
-        df[f'hour_{hour}'] = (df['hour'] == hour).astype(int)
-    df = df.drop('hour', axis=1)
+    weekly_volatility_data = []
+    for day in df['day'].unique():
+        week_ago = day - pd.Timedelta(days=7)
+        
+        # Get data from the past week for this specific hour
+        past_week_mask = (
+            (df['day'] >= week_ago) & 
+            (df['day'] < day)
+        )
+        past_week_data = df[past_week_mask]
+        
+        if len(past_week_data) > 1:
+            volatility_price_spread = past_week_data['outturn_price_spread'].std()
+            volatility_gb_price = past_week_data['GB Price'].std()
+            price_columns = [col for col in df.columns if 'price' in col.lower() and 'gb' not in col.lower()]
+            volatility_other_price = past_week_data[price_columns[0]].std() if price_columns else np.nan
+        else:
+            volatility_price_spread = np.nan
+            volatility_gb_price = np.nan
+            volatility_other_price = np.nan
+            
+        for hour in range(24):
+            weekly_volatility_data.append({
+                'day': day,
+                'hour': hour,
+                'weekly_volatility_price_spread': volatility_price_spread,
+                'weekly_volatility_GB_price_spread': volatility_gb_price,
+                'weekly_volatility_other_price': volatility_other_price
+            })
+
+    volatility_df = pd.DataFrame(weekly_volatility_data)
+    df = df.merge(volatility_df, on=['day', 'hour'], how='left')
+    # df['rolling_volatility_price_spread'] = df['outturn_price_spread'].rolling(window=window, min_periods=1).std()
+    # df['rolling_volatility_GB_price_spread'] = df['GB Price'].rolling(window=window, min_periods=1).std()
+    # price_columns = [col for col in df.columns if 'price' in col.lower() and 'gb' not in col.lower()]
+    # if price_columns:
+    #     df[f'rolling_volatility_{price_columns[0]}'] = df[price_columns[0]].rolling(window=window).std()
     return df
 
 def perform_volatility_regression_analysis(
@@ -143,19 +175,15 @@ def perform_volatility_regression_analysis(
     raw_data_dfs = process_raw_data(raw_data_filepath)
     for sheet_name, df in raw_data_dfs.items():
         df = add_rolling_volatility(df)
-        df = add_hourly_dummy_variables(df)
         df = df[(df['Offered Capacity'] != 0) & (df['Offered Capacity'] != '-')]
-
-        hour_columns = [col for col in df.columns if col.startswith('hour_')]
-        volatility_columns = [col for col in df.columns if 'rolling_volatility' in col]
-        X_columns = volatility_columns + hour_columns
-        X = df[X_columns].dropna()
+        volatility_columns = [col for col in df.columns if 'weekly_volatility' in col]
+        X = df[volatility_columns].dropna()
         y = df.loc[X.index, 'difference']
         scaler = StandardScaler()
         X_scaled = X.copy()
         for vol_col in volatility_columns:
             X_scaled[vol_col] = scaler.fit_transform(X[[vol_col]])
-    
+        
         model = LinearRegression()
         model.fit(X_scaled, y)
 
@@ -182,3 +210,267 @@ def perform_volatility_regression_analysis(
             summary_df.to_excel(writer, sheet_name=f"{sheet_name}_coefficients", index=False)
             stats_df.to_excel(writer, sheet_name=f"{sheet_name}_statistics", index=False)
         print(model_sm.summary())
+
+def fit_distributions_and_compare_aic(
+    dataframes: Dict[str, pd.DataFrame]
+) -> Dict[str, Dict]:
+    """
+    Fit t-distribution and normal distribution to difference data.
+    Compare using AIC to test for heavy tails.
+    """
+    results = {}
+    
+    for sheet_name, df in dataframes.items():
+        data = df['difference'].dropna()
+        n = len(data)
+        
+        print(f"\n{'='*50}")
+        print(f"DISTRIBUTION FITTING: {sheet_name}")
+        print(f"{'='*50}")
+        print(f"Sample size: {n}")
+        
+        normal_params = norm.fit(data)
+        normal_mu, normal_sigma = normal_params
+        
+        normal_loglik = np.sum(norm.logpdf(data, loc=normal_mu, scale=normal_sigma))
+        normal_aic = 2 * 2 - 2 * normal_loglik  # 2 parameters (mu, sigma)
+
+        t_params = t.fit(data)
+        t_df, t_loc, t_scale = t_params
+
+        t_loglik = np.sum(t.logpdf(data, df=t_df, loc=t_loc, scale=t_scale))
+        t_aic = 2 * 3 - 2 * t_loglik  # 3 parameters (df, loc, scale)
+
+        aic_difference = normal_aic - t_aic
+        
+        print(f"\nNORMAL DISTRIBUTION:")
+        print(f"  Parameters: μ = {normal_mu:.4f}, σ = {normal_sigma:.4f}")
+        print(f"  Log-likelihood: {normal_loglik:.4f}")
+        print(f"  AIC: {normal_aic:.4f}")
+        
+        print(f"\nt-DISTRIBUTION:")
+        print(f"  Parameters: df = {t_df:.4f}, loc = {t_loc:.4f}, scale = {t_scale:.4f}")
+        print(f"  Log-likelihood: {t_loglik:.4f}")
+        print(f"  AIC: {t_aic:.4f}")
+        
+        print(f"\nAIC COMPARISON:")
+        print(f"  AIC difference (Normal - t): {aic_difference:.4f}")
+        
+        if aic_difference > 2:
+            print(f"  → t-distribution fits SIGNIFICANTLY better (heavy tails detected)")
+            better_fit = "t-distribution"
+        elif aic_difference < -2:
+            print(f"  → Normal distribution fits significantly better")
+            better_fit = "normal"
+        else:
+            print(f"  → No significant difference in fit")
+            better_fit = "similar"
+        
+        plt.figure(figsize=(15, 5))
+        
+        plt.subplot(1, 3, 1)
+        plt.hist(data, bins=30, density=True, alpha=0.7, color='lightblue', 
+                edgecolor='black', label='Data')
+        
+        x_range = np.linspace(data.min(), data.max(), 100)
+        plt.plot(x_range, norm.pdf(x_range, normal_mu, normal_sigma), 
+                'r-', linewidth=2, label='Normal')
+        plt.plot(x_range, t.pdf(x_range, t_df, t_loc, t_scale), 
+                'g-', linewidth=2, label='t-distribution')
+        
+        plt.xlabel('Difference')
+        plt.ylabel('Density')
+        plt.title(f'{sheet_name}: Distribution Fits')
+        plt.legend()
+        plt.grid(alpha=0.3)
+        
+        plt.subplot(1, 3, 2)
+        stats.probplot(data, dist="norm", plot=plt)
+        plt.title('Q-Q vs Normal')
+        plt.grid(alpha=0.3)
+        
+        plt.subplot(1, 3, 3)
+        # Create custom t-distribution for Q-Q plot
+        fitted_t = t(df=t_df, loc=t_loc, scale=t_scale)
+        stats.probplot(data, dist=fitted_t, plot=plt)
+        plt.title('Q-Q vs t-distribution')
+        plt.grid(alpha=0.3)
+        
+        plt.tight_layout()
+        plt.show()
+        
+        # Store results
+        results[sheet_name] = {
+            'normal_params': normal_params,
+            'normal_aic': normal_aic,
+            't_params': t_params,
+            't_aic': t_aic,
+            'aic_difference': aic_difference,
+            'better_fit': better_fit,
+            'heavy_tails': aic_difference > 2
+        }
+    
+    return results
+
+from scipy.stats import genpareto
+
+def fit_gpd_and_compare_aic(
+    dataframes: Dict[str, pd.DataFrame]
+) -> Dict[str, Dict]:
+    """
+    Fit Generalized Pareto Distribution and compare with normal and t-distribution.
+    GPD is particularly good for modeling extreme values and heavy tails.
+    """
+    results = {}
+    
+    for sheet_name, df in dataframes.items():
+        data = df['difference'].dropna()
+        n = len(data)
+        
+        print(f"\n{'='*50}")
+        print(f"GENERALIZED PARETO DISTRIBUTION FITTING: {sheet_name}")
+        print(f"{'='*50}")
+        print(f"Sample size: {n}")
+        
+        # 1. Fit Normal Distribution
+        normal_params = norm.fit(data)
+        normal_mu, normal_sigma = normal_params
+        normal_loglik = np.sum(norm.logpdf(data, loc=normal_mu, scale=normal_sigma))
+        normal_aic = 2 * 2 - 2 * normal_loglik  # 2 parameters
+        
+        # 2. Fit t-Distribution  
+        t_params = t.fit(data)
+        t_df, t_loc, t_scale = t_params
+        t_loglik = np.sum(t.logpdf(data, df=t_df, loc=t_loc, scale=t_scale))
+        t_aic = 2 * 3 - 2 * t_loglik  # 3 parameters
+        
+        # 3. Fit Generalized Pareto Distribution
+        try:
+            gpd_params = genpareto.fit(data)
+            gpd_c, gpd_loc, gpd_scale = gpd_params  # c=shape, loc=location, scale=scale
+            gpd_loglik = np.sum(genpareto.logpdf(data, c=gpd_c, loc=gpd_loc, scale=gpd_scale))
+            gpd_aic = 2 * 3 - 2 * gpd_loglik  # 3 parameters
+            gpd_fit_success = True
+        except Exception as e:
+            print(f"Warning: GPD fitting failed: {e}")
+            gpd_params = None
+            gpd_aic = np.inf
+            gpd_fit_success = False
+        
+        # Print results
+        print(f"\nNORMAL DISTRIBUTION:")
+        print(f"  Parameters: μ = {normal_mu:.4f}, σ = {normal_sigma:.4f}")
+        print(f"  Log-likelihood: {normal_loglik:.4f}")
+        print(f"  AIC: {normal_aic:.4f}")
+        
+        print(f"\nt-DISTRIBUTION:")
+        print(f"  Parameters: df = {t_df:.4f}, loc = {t_loc:.4f}, scale = {t_scale:.4f}")
+        print(f"  Log-likelihood: {t_loglik:.4f}")
+        print(f"  AIC: {t_aic:.4f}")
+        
+        if gpd_fit_success:
+            print(f"\nGENERALIZED PARETO DISTRIBUTION:")
+            print(f"  Parameters: c = {gpd_c:.4f}, loc = {gpd_loc:.4f}, scale = {gpd_scale:.4f}")
+            print(f"  Log-likelihood: {gpd_loglik:.4f}")
+            print(f"  AIC: {gpd_aic:.4f}")
+            
+            # Interpret shape parameter
+            if gpd_c > 0:
+                print(f"  Shape parameter c > 0: Heavy tails (Pareto-type)")
+            elif gpd_c == 0:
+                print(f"  Shape parameter c = 0: Exponential-type tails")
+            else:
+                print(f"  Shape parameter c < 0: Bounded distribution")
+        
+        # AIC Comparisons
+        print(f"\nAIC COMPARISONS:")
+        aic_diff_normal_t = normal_aic - t_aic
+        print(f"  Normal vs t-distribution: {aic_diff_normal_t:.4f}")
+        
+        if gpd_fit_success:
+            aic_diff_normal_gpd = normal_aic - gpd_aic
+            aic_diff_t_gpd = t_aic - gpd_aic
+            print(f"  Normal vs GPD: {aic_diff_normal_gpd:.4f}")
+            print(f"  t-distribution vs GPD: {aic_diff_t_gpd:.4f}")
+            
+            # Determine best fit
+            aics = {'Normal': normal_aic, 't-distribution': t_aic, 'GPD': gpd_aic}
+            best_dist = min(aics, key=aics.get)
+            print(f"\n  BEST FIT (lowest AIC): {best_dist} (AIC = {aics[best_dist]:.4f})")
+            
+            # Significant differences (AIC difference > 2)
+            if aic_diff_normal_gpd > 2:
+                print(f"  → GPD fits SIGNIFICANTLY better than Normal")
+            if aic_diff_t_gpd > 2:
+                print(f"  → GPD fits SIGNIFICANTLY better than t-distribution")
+            elif aic_diff_t_gpd < -2:
+                print(f"  → t-distribution fits SIGNIFICANTLY better than GPD")
+            else:
+                print(f"  → GPD and t-distribution have similar fit quality")
+        
+        # Create comparison plots
+        plt.figure(figsize=(20, 5))
+        
+        # Subplot 1: Histogram with all fitted distributions
+        plt.subplot(1, 4, 1)
+        plt.hist(data, bins=30, density=True, alpha=0.7, color='lightblue', 
+                edgecolor='black', label='Data')
+        
+        x_range = np.linspace(data.min(), data.max(), 200)
+        plt.plot(x_range, norm.pdf(x_range, normal_mu, normal_sigma), 
+                'r-', linewidth=2, label='Normal')
+        plt.plot(x_range, t.pdf(x_range, t_df, t_loc, t_scale), 
+                'g-', linewidth=2, label='t-distribution')
+        
+        if gpd_fit_success:
+            plt.plot(x_range, genpareto.pdf(x_range, gpd_c, gpd_loc, gpd_scale), 
+                    'orange', linewidth=2, label='GPD')
+        
+        plt.xlabel('Difference')
+        plt.ylabel('Density')
+        plt.title(f'{sheet_name}: Distribution Fits')
+        plt.legend()
+        plt.grid(alpha=0.3)
+        
+        # Subplot 2: Q-Q plot against normal
+        plt.subplot(1, 4, 2)
+        stats.probplot(data, dist="norm", plot=plt)
+        plt.title('Q-Q vs Normal')
+        plt.grid(alpha=0.3)
+        
+        # Subplot 3: Q-Q plot against t-distribution
+        plt.subplot(1, 4, 3)
+        fitted_t = t(df=t_df, loc=t_loc, scale=t_scale)
+        stats.probplot(data, dist=fitted_t, plot=plt)
+        plt.title('Q-Q vs t-distribution')
+        plt.grid(alpha=0.3)
+        
+        # Subplot 4: Q-Q plot against GPD (if successful)
+        plt.subplot(1, 4, 4)
+        if gpd_fit_success:
+            fitted_gpd = genpareto(c=gpd_c, loc=gpd_loc, scale=gpd_scale)
+            stats.probplot(data, dist=fitted_gpd, plot=plt)
+            plt.title('Q-Q vs GPD')
+        else:
+            plt.text(0.5, 0.5, 'GPD Fit Failed', ha='center', va='center', 
+                    transform=plt.gca().transAxes, fontsize=14)
+            plt.title('GPD Fit Failed')
+        plt.grid(alpha=0.3)
+        
+        plt.tight_layout()
+        plt.show()
+        
+        # Store results
+        results[sheet_name] = {
+            'normal_params': normal_params,
+            'normal_aic': normal_aic,
+            't_params': t_params,
+            't_aic': t_aic,
+            'gpd_params': gpd_params if gpd_fit_success else None,
+            'gpd_aic': gpd_aic if gpd_fit_success else np.inf,
+            'gpd_fit_success': gpd_fit_success,
+            'best_distribution': min(aics, key=aics.get) if gpd_fit_success else ('t-distribution' if t_aic < normal_aic else 'Normal'),
+            'heavy_tails_gpd': gpd_c > 0 if gpd_fit_success else False
+        }
+    
+    return results
