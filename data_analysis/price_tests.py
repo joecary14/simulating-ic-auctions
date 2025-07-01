@@ -10,7 +10,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 from scipy.stats import rv_continuous
 from sklearn.preprocessing import StandardScaler
-from scipy.stats import t, norm, genpareto
+from scipy.stats import t, norm, genpareto, skewnorm, gennorm, laplace
 from scipy.optimize import minimize
 
 def process_raw_data(
@@ -22,17 +22,40 @@ def process_raw_data(
         processed_data_df = raw_data_df.copy()
         processed_data_df = processed_data_df.replace('-', 0).infer_objects(copy=False)
         df_columns = processed_data_df.columns
-        col2 = df_columns[1]
-        col3 = df_columns[2]
+        to_gb_price_col = df_columns[1]
+        from_gb_price_col = df_columns[2]
+        gb_price_col = df_columns[3]
+        foreign_price_col = df_columns[4]
         processed_data_df['market_expectation_price'] = processed_data_df.apply(
-            lambda row: -row[col3] if row[col3] > row[col2] else row[col2],
+            lambda row: row[to_gb_price_col] if row[to_gb_price_col] > row[from_gb_price_col] else -row[from_gb_price_col],
             axis=1
         )
-        processed_data_df['outturn_price_spread'] = processed_data_df[df_columns[3]] - processed_data_df[df_columns[4]]
-        processed_data_df['difference'] = processed_data_df['outturn_price_spread'] - processed_data_df['market_expectation_price']
+        
+        processed_data_df['market_expectation_capacity_cost'] = processed_data_df.apply(
+            lambda row: row[to_gb_price_col] if row[to_gb_price_col] > row[from_gb_price_col] else row[from_gb_price_col],
+            axis=1
+        ) #Assume cost is based on the market expectation price
+        
+        processed_data_df['payoff'] = processed_data_df.apply(
+            lambda row: row[gb_price_col] - row[foreign_price_col] if row[to_gb_price_col] > row[from_gb_price_col] else row[foreign_price_col] - row[gb_price_col],
+            axis=1
+        )
+        
+        processed_data_df['outturn_price_spread'] = processed_data_df[gb_price_col] - processed_data_df[foreign_price_col]
+        processed_data_df['difference'] = processed_data_df['payoff'] - processed_data_df['market_expectation_capacity_cost']
+        processed_data_df['percentage_profit'] = processed_data_df.apply(
+            lambda row: row['difference']/np.abs(row['payoff']) if row['payoff'] != 0 else 0
+        )
         processed_data_dfs[sheet_name] = processed_data_df[processed_data_df['Offered Capacity'] != 0]
     
     return processed_data_dfs
+
+def print_average_percentage_payoff(
+    dataframes: Dict[str, pd.DataFrame]
+) -> None:
+    for sheet_name, dataframe in dataframes.items():
+        average_percentage_profit = dataframe['percentage_profit'].mean()
+        print(f"Average percentage profit for {sheet_name}: {average_percentage_profit}")
 
 def test_for_normality(
     dataframes: Dict[str, pd.DataFrame]
@@ -145,11 +168,13 @@ def add_rolling_volatility(df: pd.DataFrame):
             price_columns = [col for col in df.columns if 'price' in col.lower() and 'gb' not in col.lower()]
             volatility_other_price = past_week_data[price_columns[0]].std() if price_columns else np.nan
             volatility_market_expectation_price = past_week_data['market_expectation_price'].std()
+            volatility_profit = past_week_data['difference'].std()
         else:
             volatility_price_spread = np.nan
             volatility_gb_price = np.nan
             volatility_other_price = np.nan
             volatility_market_expectation_price = np.nan
+            volatility_profit = np.nan
             
         for hour in range(24):
             weekly_volatility_data.append({
@@ -158,7 +183,8 @@ def add_rolling_volatility(df: pd.DataFrame):
                 'weekly_volatility_price_spread': volatility_price_spread,
                 'weekly_volatility_GB_price_spread': volatility_gb_price,
                 'weekly_volatility_other_price': volatility_other_price,
-                'weekly_volatility_market_expectation_price': volatility_market_expectation_price
+                'weekly_volatility_market_expectation_price': volatility_market_expectation_price,
+                'weekly_volatility_profit': volatility_profit
             })
 
     volatility_df = pd.DataFrame(weekly_volatility_data)
@@ -180,16 +206,8 @@ def perform_volatility_regression_analysis(
         df = add_rolling_volatility(df)
         # Add monthly dummy variables
         df['datetime'] = pd.to_datetime(df['UTC Datetime'])
-        df['month'] = df['datetime'].dt.month
-
-        # Create dummy variables for each month
-        for month in range(1, 13):
-            month_name = pd.to_datetime(f'2023-{month:02d}-01').strftime('%B')
-            df[f'month_{month_name}'] = (df['month'] == month).astype(int)
-        df = df[(df['Offered Capacity'] != 0) & (df['Offered Capacity'] != '-')]
         volatility_columns = [col for col in df.columns if 'weekly_volatility' in col]
-        month_columns = [col for col in df.columns if col.startswith('month_')]
-        regressor_columns = volatility_columns + month_columns
+        regressor_columns = volatility_columns
         X = df[regressor_columns].dropna()
         y = df.loc[X.index, 'difference']
         scaler = StandardScaler()
@@ -366,8 +384,6 @@ def fit_distributions_and_compare_aic(
     
     return results
 
-from scipy.stats import genpareto
-
 def fit_gpd_and_compare_aic(
     dataframes: Dict[str, pd.DataFrame]
 ) -> Dict[str, Dict]:
@@ -527,4 +543,215 @@ def fit_gpd_and_compare_aic(
             'heavy_tails_gpd': gpd_c > 0 if gpd_fit_success else False
         }
     
+    return results
+
+def fit_generalized_error_distribution(dataframes: Dict[str, pd.DataFrame]) -> Dict[str, Dict]:
+    """
+    Generalized Error Distribution - very flexible for different tail behaviors
+    """
+    results = {}
+    
+    for sheet_name, df in dataframes.items():
+        data = df['difference'].dropna()
+        
+        try:
+            # Fit generalized normal (generalized error distribution)
+            ged_params = gennorm.fit(data)
+            ged_loglik = np.sum(gennorm.logpdf(data, *ged_params))
+            ged_aic = 2 * 3 - 2 * ged_loglik
+            
+            beta = ged_params[0]  # Shape parameter
+            
+            print(f"\nGENERALIZED ERROR DISTRIBUTION ({sheet_name}):")
+            print(f"  Parameters: β={beta:.4f}, loc={ged_params[1]:.4f}, scale={ged_params[2]:.4f}")
+            print(f"  AIC: {ged_aic:.4f}")
+            
+            if beta < 1:
+                print(f"  → Very heavy tails (β < 1)")
+            elif beta < 2:
+                print(f"  → Heavy tails (β < 2, heavier than normal)")
+            elif beta == 2:
+                print(f"  → Normal-like tails (β = 2)")
+            else:
+                print(f"  → Light tails (β > 2)")
+                
+            results[sheet_name] = {
+                'params': ged_params,
+                'aic': ged_aic,
+                'shape': beta
+            }
+            
+        except Exception as e:
+            print(f"GED fitting failed: {e}")
+            results[sheet_name] = None
+            
+    return results
+
+def fit_variance_gamma_approximation(dataframes: Dict[str, pd.DataFrame]) -> Dict[str, Dict]:
+    """
+    Fit Laplace distribution (Variance Gamma approximation) and compare with t-distribution
+    """
+    results = {}
+    
+    for sheet_name, df in dataframes.items():
+        data = df['difference'].dropna()
+        n = len(data)
+        
+        print(f"\n{'='*50}")
+        print(f"LAPLACE vs t-DISTRIBUTION FITTING: {sheet_name}")
+        print(f"{'='*50}")
+        print(f"Sample size: {n}")
+        
+        # 1. Fit Laplace (double exponential) - good heavy tail proxy
+        laplace_params = laplace.fit(data)
+        laplace_loglik = np.sum(laplace.logpdf(data, *laplace_params))
+        laplace_aic = 2 * 2 - 2 * laplace_loglik  # 2 parameters
+        
+        # 2. Fit t-Distribution for comparison
+        t_params = t.fit(data)
+        t_df, t_loc, t_scale = t_params
+        t_loglik = np.sum(t.logpdf(data, df=t_df, loc=t_loc, scale=t_scale))
+        t_aic = 2 * 3 - 2 * t_loglik  # 3 parameters
+        
+        # Calculate AIC difference
+        aic_difference = laplace_aic - t_aic  # Positive means t-distribution is better
+        
+        # Print results
+        print(f"\nLAPLACE DISTRIBUTION:")
+        print(f"  Parameters: loc={laplace_params[0]:.4f}, scale={laplace_params[1]:.4f}")
+        print(f"  Log-likelihood: {laplace_loglik:.4f}")
+        print(f"  AIC: {laplace_aic:.4f}")
+        print(f"  → Exponential tails (heavier than normal, lighter than Pareto)")
+        
+        print(f"\nt-DISTRIBUTION:")
+        print(f"  Parameters: df = {t_df:.4f}, loc = {t_loc:.4f}, scale = {t_scale:.4f}")
+        print(f"  Log-likelihood: {t_loglik:.4f}")
+        print(f"  AIC: {t_aic:.4f}")
+        
+        print(f"\nAIC COMPARISON:")
+        print(f"  AIC difference (Laplace - t): {aic_difference:.4f}")
+        
+        if aic_difference > 2:
+            print(f"  → t-distribution fits SIGNIFICANTLY better")
+            better_fit = "t-distribution"
+        elif aic_difference < -2:
+            print(f"  → Laplace fits SIGNIFICANTLY better")
+            better_fit = "Laplace"
+        else:
+            print(f"  → Similar fit quality")
+            better_fit = "similar"
+        
+        # Create 2x2 subplot layout
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        
+        # Subplot 1: Histogram with fitted distributions (top-left)
+        axes[0, 0].hist(data, bins=30, density=True, alpha=0.7, color='lightblue', 
+                       edgecolor='black', label='Data')
+        
+        x_range = np.linspace(data.min(), data.max(), 200)
+        axes[0, 0].plot(x_range, laplace.pdf(x_range, *laplace_params), 
+                       'orange', linewidth=2, label='Laplace')
+        axes[0, 0].plot(x_range, t.pdf(x_range, t_df, t_loc, t_scale), 
+                       'green', linewidth=2, label='t-distribution')
+        
+        axes[0, 0].set_xlabel('Difference')
+        axes[0, 0].set_ylabel('Density')
+        axes[0, 0].set_title(f'{sheet_name}: Distribution Fits')
+        axes[0, 0].legend()
+        axes[0, 0].grid(alpha=0.3)
+        
+        # Subplot 2: Q-Q plot against fitted Laplace (top-right)
+        fitted_laplace = laplace(loc=laplace_params[0], scale=laplace_params[1])
+        stats.probplot(data, dist=fitted_laplace, plot=axes[0, 1])
+        axes[0, 1].set_title('Q-Q vs Fitted Laplace')
+        axes[0, 1].grid(alpha=0.3)
+        
+        # Subplot 3: Q-Q plot against fitted t-distribution (bottom-left)
+        fitted_t = t(df=t_df, loc=t_loc, scale=t_scale)
+        stats.probplot(data, dist=fitted_t, plot=axes[1, 0])
+        axes[1, 0].set_title('Q-Q vs Fitted t-distribution')
+        axes[1, 0].grid(alpha=0.3)
+        
+        # Subplot 4: AIC comparison and parameters (bottom-right)
+        axes[1, 1].axis('off')
+        likelihood_ratio = np.exp(abs(aic_difference) / 2)
+        
+        # Determine which distribution is better for text formatting
+        if aic_difference < 0:  # Laplace is better
+            winner = "LAPLACE"
+            loser_aic = t_aic
+            winner_aic = laplace_aic
+        else:  # t-distribution is better
+            winner = "t-DISTRIBUTION"
+            loser_aic = laplace_aic
+            winner_aic = t_aic
+        
+        text_content = f"""AIC COMPARISON & PARAMETERS
+
+BEST FIT: {winner}
+AIC Difference: {abs(aic_difference):.2f}
+Likelihood Ratio: {likelihood_ratio:.2e}
+
+LAPLACE DISTRIBUTION:
+  loc = {laplace_params[0]:.4f}
+  scale = {laplace_params[1]:.4f}
+  AIC = {laplace_aic:.2f}
+  Tail Type: Exponential
+
+t-DISTRIBUTION:
+  df = {t_df:.4f}
+  loc = {t_loc:.4f}
+  scale = {t_scale:.4f}
+  AIC = {t_aic:.2f}
+  Tail Type: Power Law
+
+INTERPRETATION:
+"""
+        
+        if abs(aic_difference) > 10:
+            interpretation = f"DECISIVE evidence for {winner.lower()}"
+        elif abs(aic_difference) > 4:
+            interpretation = f"STRONG evidence for {winner.lower()}"
+        elif abs(aic_difference) > 2:
+            interpretation = f"MODERATE evidence for {winner.lower()}"
+        else:
+            interpretation = "Similar model support"
+            
+        text_content += interpretation
+        
+        # Add comparison of tail behaviors
+        text_content += f"\n\nTAIL COMPARISON:"
+        if t_df < 4:
+            text_content += f"\nt-dist: Very heavy tails (df={t_df:.2f})"
+        elif t_df < 10:
+            text_content += f"\nt-dist: Heavy tails (df={t_df:.2f})"
+        else:
+            text_content += f"\nt-dist: Moderate tails (df={t_df:.2f})"
+            
+        text_content += f"\nLaplace: Exponential decay tails"
+        
+        # Add text to subplot
+        axes[1, 1].text(0.05, 0.95, text_content, transform=axes[1, 1].transAxes,
+                       fontsize=9, verticalalignment='top', fontfamily='monospace',
+                       bbox=dict(boxstyle='round,pad=0.5', facecolor='lightyellow', alpha=0.8))
+        
+        plt.tight_layout()
+        plt.show()
+        
+        # Store results
+        results[sheet_name] = {
+            'laplace_params': laplace_params,
+            'laplace_aic': laplace_aic,
+            't_params': t_params,
+            't_aic': t_aic,
+            'aic_difference': aic_difference,
+            'better_fit': better_fit,
+            'laplace_better': aic_difference < -2,
+            't_better': aic_difference > 2,
+            'tail_comparison': {
+                'laplace_tail_type': 'exponential',
+                't_tail_heaviness': 'very_heavy' if t_df < 4 else 'heavy' if t_df < 10 else 'moderate'
+            }
+        }
+        
     return results
