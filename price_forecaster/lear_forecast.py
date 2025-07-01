@@ -10,7 +10,7 @@ def run_lear_forecast(
     start_test_date: str | pd.Timestamp,
     end_test_date: str | pd.Timestamp,
     country_code: str,
-    output_file_directory: str
+    output_folder_directory: str
 ):
     training_data = pd.read_csv(
         input_data_filepath,
@@ -58,7 +58,7 @@ def run_lear_forecast(
     start_str = pd.to_datetime(start_test_date).strftime('%Y%m%d')
     end_str = pd.to_datetime(end_test_date).strftime('%Y%m%d')
     output_filename = f"{country_code}_lear_forecast_{start_str}_to_{end_str}.csv"
-    output_filepath = f"{output_file_directory.rstrip('/')}/{output_filename}"
+    output_filepath = f"{output_folder_directory.rstrip('/')}/{output_filename}"
     r2 = r2_score(combined_results_df['actual'], combined_results_df['prediction'])
     sign_agreement = np.mean(
         np.sign(combined_results_df['actual']) == np.sign(combined_results_df['prediction'])

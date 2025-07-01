@@ -19,7 +19,6 @@ def process_raw_data(
     raw_data_dfs = pd.read_excel(raw_data_filepath, sheet_name=None, dtype=None)
     processed_data_dfs = {}
     for sheet_name, raw_data_df in raw_data_dfs.items():
-        
         processed_data_df = raw_data_df.copy()
         processed_data_df = processed_data_df.replace('-', 0).infer_objects(copy=False)
         df_columns = processed_data_df.columns
@@ -123,7 +122,7 @@ def generate_qq_plots(
         print(f"Kurtosis for {sheet_name}: {kurtosis:.4f}")
         
         
-def add_rolling_volatility(df: pd.DataFrame, window=48):
+def add_rolling_volatility(df: pd.DataFrame):
     df['datetime'] = pd.to_datetime(df['UTC Datetime'])
     df = df.sort_values('datetime')
     df['day'] = df['datetime'].dt.date
@@ -145,10 +144,12 @@ def add_rolling_volatility(df: pd.DataFrame, window=48):
             volatility_gb_price = past_week_data['GB Price'].std()
             price_columns = [col for col in df.columns if 'price' in col.lower() and 'gb' not in col.lower()]
             volatility_other_price = past_week_data[price_columns[0]].std() if price_columns else np.nan
+            volatility_market_expectation_price = past_week_data['market_expectation_price'].std()
         else:
             volatility_price_spread = np.nan
             volatility_gb_price = np.nan
             volatility_other_price = np.nan
+            volatility_market_expectation_price = np.nan
             
         for hour in range(24):
             weekly_volatility_data.append({
@@ -156,7 +157,8 @@ def add_rolling_volatility(df: pd.DataFrame, window=48):
                 'hour': hour,
                 'weekly_volatility_price_spread': volatility_price_spread,
                 'weekly_volatility_GB_price_spread': volatility_gb_price,
-                'weekly_volatility_other_price': volatility_other_price
+                'weekly_volatility_other_price': volatility_other_price,
+                'weekly_volatility_market_expectation_price': volatility_market_expectation_price
             })
 
     volatility_df = pd.DataFrame(weekly_volatility_data)
@@ -173,11 +175,22 @@ def perform_volatility_regression_analysis(
     output_data_filepath: str
 ) -> None:
     raw_data_dfs = process_raw_data(raw_data_filepath)
+    
     for sheet_name, df in raw_data_dfs.items():
         df = add_rolling_volatility(df)
+        # Add monthly dummy variables
+        df['datetime'] = pd.to_datetime(df['UTC Datetime'])
+        df['month'] = df['datetime'].dt.month
+
+        # Create dummy variables for each month
+        for month in range(1, 13):
+            month_name = pd.to_datetime(f'2023-{month:02d}-01').strftime('%B')
+            df[f'month_{month_name}'] = (df['month'] == month).astype(int)
         df = df[(df['Offered Capacity'] != 0) & (df['Offered Capacity'] != '-')]
         volatility_columns = [col for col in df.columns if 'weekly_volatility' in col]
-        X = df[volatility_columns].dropna()
+        month_columns = [col for col in df.columns if col.startswith('month_')]
+        regressor_columns = volatility_columns + month_columns
+        X = df[regressor_columns].dropna()
         y = df.loc[X.index, 'difference']
         scaler = StandardScaler()
         X_scaled = X.copy()
@@ -266,40 +279,81 @@ def fit_distributions_and_compare_aic(
             print(f"  → No significant difference in fit")
             better_fit = "similar"
         
-        plt.figure(figsize=(15, 5))
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
         
-        plt.subplot(1, 3, 1)
-        plt.hist(data, bins=30, density=True, alpha=0.7, color='lightblue', 
-                edgecolor='black', label='Data')
+        # Subplot 1: Histogram with fitted distributions (top-left)
+        axes[0, 0].hist(data, bins=30, density=True, alpha=0.7, color='lightblue', 
+                       edgecolor='black', label='Data')
         
         x_range = np.linspace(data.min(), data.max(), 100)
-        plt.plot(x_range, norm.pdf(x_range, normal_mu, normal_sigma), 
-                'r-', linewidth=2, label='Normal')
-        plt.plot(x_range, t.pdf(x_range, t_df, t_loc, t_scale), 
-                'g-', linewidth=2, label='t-distribution')
+        axes[0, 0].plot(x_range, norm.pdf(x_range, normal_mu, normal_sigma), 
+                       'r-', linewidth=2, label='Normal')
+        axes[0, 0].plot(x_range, t.pdf(x_range, t_df, t_loc, t_scale), 
+                       'g-', linewidth=2, label='t-distribution')
         
-        plt.xlabel('Difference')
-        plt.ylabel('Density')
-        plt.title(f'{sheet_name}: Distribution Fits')
-        plt.legend()
-        plt.grid(alpha=0.3)
+        axes[0, 0].set_xlabel('Difference')
+        axes[0, 0].set_ylabel('Density')
+        axes[0, 0].set_title(f'{sheet_name}: Distribution Fits')
+        axes[0, 0].legend()
+        axes[0, 0].grid(alpha=0.3)
         
-        plt.subplot(1, 3, 2)
-        stats.probplot(data, dist="norm", plot=plt)
-        plt.title('Q-Q vs Normal')
-        plt.grid(alpha=0.3)
+        # Subplot 2: Q-Q plot against fitted normal (top-right)
+        fitted_normal = norm(loc=normal_mu, scale=normal_sigma)
+        stats.probplot(data, dist=fitted_normal, plot=axes[0, 1])
+        axes[0, 1].set_title('Q-Q vs Fitted Normal')
+        axes[0, 1].grid(alpha=0.3)
         
-        plt.subplot(1, 3, 3)
-        # Create custom t-distribution for Q-Q plot
+        # Subplot 3: Q-Q plot against fitted t-distribution (bottom-left)
         fitted_t = t(df=t_df, loc=t_loc, scale=t_scale)
-        stats.probplot(data, dist=fitted_t, plot=plt)
-        plt.title('Q-Q vs t-distribution')
-        plt.grid(alpha=0.3)
+        stats.probplot(data, dist=fitted_t, plot=axes[1, 0])
+        axes[1, 0].set_title('Q-Q vs Fitted t-distribution')
+        axes[1, 0].grid(alpha=0.3)
+        
+        # Subplot 4: AIC comparison and parameters (bottom-right)
+        axes[1, 1].axis('off')
+        likelihood_ratio = np.exp(aic_difference / 2)
+        
+        text_content = f"""AIC COMPARISON & PARAMETERS
+        
+        BEST FIT: {better_fit.upper()}
+        AIC Difference: {aic_difference:.2f}
+        Likelihood Ratio: {likelihood_ratio:.2e}
+
+        NORMAL DISTRIBUTION:
+        μ = {normal_mu:.4f}
+        σ = {normal_sigma:.4f}
+        AIC = {normal_aic:.2f}
+
+        t-DISTRIBUTION:
+        df = {t_df:.4f}
+        loc = {t_loc:.4f}
+        scale = {t_scale:.4f}
+        AIC = {t_aic:.2f}
+
+        INTERPRETATION:
+        """
+        if aic_difference > 10:
+            interpretation = "DECISIVE evidence for heavy tails"
+        elif aic_difference > 4:
+            interpretation = "STRONG evidence for heavy tails"
+        elif aic_difference > 2:
+            interpretation = "MODERATE evidence for heavy tails"
+        elif aic_difference < -2:
+            interpretation = "Evidence AGAINST heavy tails"
+        else:
+            interpretation = "Similar model support"
+            
+        text_content += interpretation
+        
+        # Add text to subplot
+        axes[1, 1].text(0.05, 0.95, text_content, transform=axes[1, 1].transAxes,
+                       fontsize=10, verticalalignment='top', fontfamily='monospace',
+                       bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgray', alpha=0.8))
         
         plt.tight_layout()
         plt.show()
         
-        # Store results
+        # Store results (unchanged)
         results[sheet_name] = {
             'normal_params': normal_params,
             'normal_aic': normal_aic,

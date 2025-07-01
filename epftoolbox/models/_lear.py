@@ -64,9 +64,9 @@ class LEAR(object):
         # # Applying Invariant, aka asinh-median transformation to the prices
         [Ytrain], self.scalerY = scaling([Ytrain], 'Invariant')
 
-        # # Rescaling all inputs except dummies (7 last features)
-        [Xtrain_no_dummies], self.scalerX = scaling([Xtrain[:, :-7]], 'Invariant')
-        Xtrain[:, :-7] = Xtrain_no_dummies
+        # # Rescaling all inputs except dummies (19 last features (= 7 days + 12 months))
+        [Xtrain_no_dummies], self.scalerX = scaling([Xtrain[:, :-19]], 'Invariant')
+        Xtrain[:, :-19] = Xtrain_no_dummies
 
         self.models = {}
         for h in range(24):
@@ -98,9 +98,9 @@ class LEAR(object):
         # Predefining predicted prices
         Yp = np.zeros(24)
 
-        # # Rescaling all inputs except dummies (7 last features)
-        X_no_dummies = self.scalerX.transform(X[:, :-7])
-        X[:, :-7] = X_no_dummies
+        # # Rescaling all inputs except dummies (19 (=7 days +12 months) last features)
+        X_no_dummies = self.scalerX.transform(X[:, :-19])
+        X[:, :-19] = X_no_dummies
 
         # Predicting the current date using a recalibrated LEAR
         for h in range(24):
@@ -169,10 +169,10 @@ class LEAR(object):
         # Defining the number of Exogenous inputs
         n_exogenous_inputs = len(df_train.columns) - 1
 
-        # 96 prices + n_exogenous * (24 * 3 exogeneous) + 7 weekday dummies
+        # 96 prices + n_exogenous * (24 * 3 exogeneous) + 7 weekday dummies +12 month dummies
         # Price lags: D-1, D-2, D-3, D-7
         # Exogeneous inputs lags: D, D-1, D-7
-        n_features = 96 + 7 + n_exogenous_inputs * 72
+        n_features = 96 + 7 + n_exogenous_inputs * 72 + 12
 
 
         # Extracting the predicted dates for testing and training. We leave the first week of data
@@ -273,6 +273,11 @@ class LEAR(object):
         for dayofweek in range(7):
             Xtrain[indexTrain.index.dayofweek == dayofweek, feature_index] = 1
             Xtest[indexTest.index.dayofweek == dayofweek, feature_index] = 1
+            feature_index += 1
+        
+        for month in range(1, 13):
+            Xtrain[indexTrain.index.month == month, feature_index] = 1
+            Xtest[indexTest.index.month == month, feature_index] = 1
             feature_index += 1
 
         # Extracting the predicted values Y
